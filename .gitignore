@@ -1,0 +1,35 @@
+# Build / compiler output
+# Note: ImageToolbox.exe is intentionally tracked; do not ignore it.
+*.pdb
+*.dll
+*.cache
+*.obj
+*.resources
+
+# Visual Studio / MSBuild
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+*.csproj.user
+
+# ReSharper / Rider
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+# OS junk
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Temporary / misc
+*.tmp
+*.log
+*.bak
+*.orig
+*.rej
