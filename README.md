@@ -6,7 +6,7 @@
 
 | 工具 | 说明 |
 | --- | --- |
-| **WebP 转 PNG** | 批量把 `.webp` 转为 PNG，支持缩略图预览、勾选、递归扫描文件夹、刷新目录、拖拽添加、同名改名。 |
+| **批量处理** | 批量转换格式（PNG/JPG/BMP/GIF/TIFF，WebP 可作输入）、缩放、旋转翻转（含 EXIF 自动校正）、重命名（模板/序号/查找替换）、加水印（文字/图片、九宫格、平铺、透明度）。 |
 | **局部覆盖** | 用一张覆盖图的某个区域，替换目标图相同位置（按比例对应），可框选预览后保存。 |
 | **风格调整** | 13 种预设滤镜 + 手动调色（亮度/对比度/饱和度/色温/色调）+ 空间特效（暗角/柔焦/锐化/颗粒/漏光/边框），实时预览。 |
 | **取色配色** | 分析参考图的整体影调与色调（亮度、对比度、饱和度、冷暖、品绿），把风格统计迁移到目标图。 |
@@ -41,14 +41,14 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 ImageToolbox/
 ├── ToolPage.cs         # 工具页抽象基类（ToolName / Shutdown）
 ├── Program.cs          # 主窗口外壳（TabControl）+ 程序入口
-├── WebPToPngPage.cs    # “WebP 转 PNG”工具页
+├── BatchProcessPage.cs # “批量处理”工具页
 ├── LocalOverlayPage.cs # “局部覆盖”工具页
 ├── StyleAdjustPage.cs  # “风格调整”工具页
 ├── ColorMatchPage.cs   # “取色配色”工具页
 ├── ImageCanvas.cs      # 可框选的图片显示控件
 ├── ImageEffects.cs     # 色彩矩阵、预设滤镜、空间特效、取色统计
 ├── ImageUtil.cs        # 通用图片加载 / 合成 / 保存（WIC 解码）
-├── WebPConverter.cs    # WebP -> PNG 转换逻辑
+├── ImageBatch.cs       # 批量处理逻辑（格式/缩放/旋转/重命名/水印）
 ├── app.manifest        # 应用程序清单（DPI 感知）
 ├── app.ico             # 程序图标
 ├── build.ps1           # 一键编译脚本

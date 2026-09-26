@@ -29,7 +29,7 @@ namespace ImageToolbox
             _tabs.Dock = DockStyle.Fill;
             Controls.Add(_tabs);
 
-            AddTool(new WebPToPngPage());
+            AddTool(new BatchProcessPage());
             AddTool(new LocalOverlayPage());
             AddTool(new StyleAdjustPage());
             AddTool(new ColorMatchPage());
