@@ -39,6 +39,12 @@ namespace ImageToolbox
             AddTool(new BrushBlurPage());
             AddTool(new ImageAdjustPage());
             AddTool(new ColorMatchPage());
+            AddTool(new ImageInfoPage());
+            AddTool(new ImageComparePage());
+            AddTool(new LayerComposePage());
+            AddTool(new MattingPage());
+            AddTool(new ColorToolPage());
+            AddTool(new MultiSizeExportPage());
         }
 
         public void AddTool(ToolPage tool)
