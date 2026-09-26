@@ -39,6 +39,29 @@ namespace ImageToolbox
             return FromArray(r);
         }
 
+        public static ColorMatrix Lerp(ColorMatrix a, ColorMatrix b, float t)
+        {
+            if (t < 0f)
+            {
+                t = 0f;
+            }
+            if (t > 1f)
+            {
+                t = 1f;
+            }
+            float[,] x = ToArray(a);
+            float[,] y = ToArray(b);
+            float[,] r = new float[5, 5];
+            for (int i = 0; i < 5; i++)
+            {
+                for (int j = 0; j < 5; j++)
+                {
+                    r[i, j] = x[i, j] + (y[i, j] - x[i, j]) * t;
+                }
+            }
+            return FromArray(r);
+        }
+
         public static ColorMatrix Brightness(float b)
         {
             ColorMatrix m = Identity();

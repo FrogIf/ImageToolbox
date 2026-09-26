@@ -395,6 +395,11 @@ namespace ImageToolbox
 
         private ColorMatrix CurrentMatrix()
         {
+            return ImageEffects.Lerp(ImageEffects.Identity(), BaseMatrix(), _strengthBar.Value / 100f);
+        }
+
+        private ColorMatrix BaseMatrix()
+        {
             int index = _presetBox.SelectedIndex;
             if (index == _presetBox.Items.Count - 1)
             {
