@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Windows.Forms;
 
@@ -33,6 +34,12 @@ namespace ImageToolbox
         private Bitmap _shownPreview;
         private Bitmap _displayImage;
         private Bitmap _entrySnapshot;
+
+        private bool _moveMode;
+        private bool _moving;
+        private EditLayer _moveLayer;
+        private Point _moveStart;
+        private Point _moveStartOffset;
 
         public SingleEditPage()
         {
@@ -162,6 +169,9 @@ namespace ImageToolbox
             _canvas.BrushStarted += delegate(Point p) { DispatchBrush(p, 0); };
             _canvas.BrushMoved += delegate(Point p) { DispatchBrush(p, 1); };
             _canvas.BrushFinished += delegate { DispatchBrush(Point.Empty, 2); };
+            _canvas.DragStarted += delegate(Point p) { BeginMove(ToSession(p)); };
+            _canvas.DragMoved += delegate(Point p) { UpdateMove(ToSession(p)); };
+            _canvas.DragFinished += delegate { EndMove(); };
             body.Controls.Add(_canvas, 1, 0);
 
             Panel right = new Panel();
@@ -188,6 +198,7 @@ namespace ImageToolbox
             _layerPanel.Height = 318;
             _layerPanel.MinimumSize = new Size(0, 220);
             _layerPanel.LayersChanged += delegate { OnLayersChanged(); };
+            _layerPanel.MoveModeChanged += delegate(bool on) { SetMoveMode(on); };
             right.Controls.Add(_layerPanel);
             _layerPanel.Bind(_session);
 
@@ -274,6 +285,7 @@ namespace ImageToolbox
             CaptureEntrySnapshot();
             ReloadAll();
             _layerPanel.Sync();
+            _layerPanel.SetMoveMode(false);
             _status.Text = "已载入：" + Path.GetFileName(_sourcePath) + "  （" + _session.Width + "x" + _session.Height + "）";
         }
 
@@ -354,6 +366,10 @@ namespace ImageToolbox
                 _canvas.LockAspect = 0f;
                 _canvas.Selection = Rectangle.Empty;
                 _ops[_active].Attach(_opSource, _previewSource, _canvas);
+                if (_moveMode)
+                {
+                    ApplyMoveCanvas();
+                }
                 _previewTimer.Stop();
                 ComputePreview();
             }
@@ -539,19 +555,100 @@ namespace ImageToolbox
                 (int)Math.Round(r.Width * s), (int)Math.Round(r.Height * s));
         }
 
+        private Point ToLayer(Point sessionPoint)
+        {
+            if (_active < 0 || _ops[_active].DocumentLevel) { return sessionPoint; }
+            EditLayer layer = _session.ActiveLayer;
+            if (layer == null) { return sessionPoint; }
+            return new Point(sessionPoint.X - layer.Offset.X, sessionPoint.Y - layer.Offset.Y);
+        }
+
         private void DispatchClick(Point p)
         {
-            if (_active >= 0) { _ops[_active].OnCanvasClick(ToSession(p)); }
+            if (_active >= 0) { _ops[_active].OnCanvasClick(ToLayer(ToSession(p))); }
         }
 
         private void DispatchSelection()
         {
-            if (_active >= 0) { _ops[_active].OnCanvasSelection(ToSession(_canvas.Selection)); }
+            if (_active < 0) { return; }
+            Rectangle r = ToSession(_canvas.Selection);
+            if (!_ops[_active].DocumentLevel)
+            {
+                EditLayer layer = _session.ActiveLayer;
+                if (layer != null)
+                {
+                    r = new Rectangle(r.X - layer.Offset.X, r.Y - layer.Offset.Y, r.Width, r.Height);
+                }
+            }
+            _ops[_active].OnCanvasSelection(r);
         }
 
         private void DispatchBrush(Point p, int action)
         {
-            if (_active >= 0) { _ops[_active].OnBrushPoint(action == 2 ? Point.Empty : ToSession(p), action); }
+            if (_active >= 0) { _ops[_active].OnBrushPoint(action == 2 ? Point.Empty : ToLayer(ToSession(p)), action); }
+        }
+
+        private void SetMoveMode(bool on)
+        {
+            _moveMode = on;
+            _moving = false;
+            _moveLayer = null;
+            _moveStartOffset = Point.Empty;
+            if (on)
+            {
+                ApplyMoveCanvas();
+                _previewTimer.Stop();
+                ComputePreview();
+                _status.Text = "移动模式：在画布上按住拖动即可移动当前图层";
+            }
+            else
+            {
+                _canvas.DragEnabled = false;
+                ReloadAll();
+            }
+        }
+
+        private void ApplyMoveCanvas()
+        {
+            _canvas.ReadOnly = true;
+            _canvas.BrushEnabled = false;
+            _canvas.LockAspect = 0f;
+            _canvas.Selection = Rectangle.Empty;
+            _canvas.DragEnabled = true;
+        }
+
+        private void BeginMove(Point p)
+        {
+            if (!_moveMode || !_session.HasImage) { return; }
+            _moveLayer = _session.ActiveLayer;
+            if (_moveLayer == null) { return; }
+            _moveStart = p;
+            _moveStartOffset = _moveLayer.Offset;
+            _moving = true;
+        }
+
+        private void UpdateMove(Point p)
+        {
+            if (!_moving || _moveLayer == null) { return; }
+            int dx = p.X - _moveStart.X;
+            int dy = p.Y - _moveStart.Y;
+            _moveLayer.Offset = new Point(_moveStartOffset.X + dx, _moveStartOffset.Y + dy);
+            _previewTimer.Stop();
+            ComputePreview();
+        }
+
+        private void EndMove()
+        {
+            if (!_moving) { return; }
+            _moving = false;
+            if (_moveLayer != null && _moveLayer.Offset != _moveStartOffset)
+            {
+                _session.CommitOffset(_moveLayer, _moveStartOffset);
+                _status.Text = "已移动图层（内容不会丢失，移回即可复原）";
+            }
+            _moveStartOffset = Point.Empty;
+            ReloadAll();
+            _layerPanel.Sync();
         }
 
         private void ApplyActive()

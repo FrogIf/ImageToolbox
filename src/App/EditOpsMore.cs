@@ -823,6 +823,8 @@ namespace ImageToolbox
         private ImageCanvas _overlayCanvas;
         private ListBox _regions;
         private List<Rectangle> _list = new List<Rectangle>();
+        private ComboBox _mode;
+        private Rectangle _selection;
         private TrackBar _feather, _opacity;
         private Label _featherV, _opacityV;
 
@@ -836,26 +838,37 @@ namespace ImageToolbox
             _overlayCanvas.ReadOnly = true;
             Controls.Add(_overlayCanvas);
 
+            EditOpUi.Caption(this, "覆盖位置", 144);
+            _mode = EditOpUi.Combo(this, 140, new string[] { "相对", "绝对" }, 0);
+            _mode.Location = new Point(76, 140);
+            _mode.Width = 224;
+            _mode.SelectedIndexChanged += delegate { RaisePreview(); };
+
             _regions = new ListBox();
-            _regions.Location = new Point(10, 140);
-            _regions.Size = new Size(290, 90);
+            _regions.Location = new Point(10, 174);
+            _regions.Size = new Size(290, 84);
             _regions.IntegralHeight = false;
             Controls.Add(_regions);
 
-            EditOpUi.Button(this, "添加选区", 10, 240, 90, delegate { AddRegion(); });
-            EditOpUi.Button(this, "移除", 106, 240, 70, delegate { RemoveRegion(); });
-            EditOpUi.Button(this, "清空", 182, 240, 70, delegate { _list.Clear(); RefreshRegions(); RaisePreview(); });
+            EditOpUi.Button(this, "添加选区", 10, 266, 90, delegate { AddRegion(); });
+            EditOpUi.Button(this, "移除", 106, 266, 70, delegate { RemoveRegion(); });
+            EditOpUi.Button(this, "清空", 182, 266, 70, delegate { _list.Clear(); RefreshRegions(); RaisePreview(); });
 
-            _feather = EditOpUi.Slider(this, "羽化", 282, 0, 80, 12, out _featherV);
-            _opacity = EditOpUi.Slider(this, "不透明", 318, 0, 100, 100, out _opacityV);
+            _feather = EditOpUi.Slider(this, "羽化", 308, 0, 80, 12, out _featherV);
+            _opacity = EditOpUi.Slider(this, "不透明", 344, 0, 100, 100, out _opacityV);
             _feather.ValueChanged += delegate { _featherV.Text = _feather.Value.ToString(); RaisePreview(); };
             _opacity.ValueChanged += delegate { _opacityV.Text = _opacity.Value + "%"; RaisePreview(); };
-            EditOpUi.Note(this, "在左侧图片框选后「添加选区」，可加多个；覆盖图按比例映射。", 356, 48);
+            EditOpUi.Note(this, "在左侧图片框选后「添加选区」，可加多个。相对：按比例取覆盖图上对应的一块，再缩放到底图选区；绝对：用选区的像素位置和大小，1:1 在覆盖图上截取并贴到底图同一位置（覆盖图比底图大时用此项）。", 382, 84);
         }
 
         protected override void OnActivate()
         {
             if (Canvas != null) { Canvas.ReadOnly = false; }
+        }
+
+        public override void OnCanvasSelection(Rectangle imageRect)
+        {
+            _selection = imageRect;
         }
 
         private void BrowseOverlay()
@@ -879,8 +892,8 @@ namespace ImageToolbox
 
         private void AddRegion()
         {
-            if (Canvas == null || Source == null) { return; }
-            Rectangle r = Rectangle.Intersect(Canvas.Selection, new Rectangle(0, 0, Source.Width, Source.Height));
+            if (Source == null) { return; }
+            Rectangle r = Rectangle.Intersect(_selection, new Rectangle(0, 0, Source.Width, Source.Height));
             if (r.Width < 1 || r.Height < 1) { return; }
             _list.Add(r);
             RefreshRegions();
@@ -920,40 +933,46 @@ namespace ImageToolbox
         {
             if (_overlay == null || _list.Count == 0) { return null; }
             float scale = (float)target.Width / Source.Width;
-            Size targetSize = new Size(target.Width, target.Height);
+            Size sourceSize = new Size(Source.Width, Source.Height);
             Size overlaySize = new Size(_overlay.Width, _overlay.Height);
+            Rectangle overlayRect = new Rectangle(0, 0, _overlay.Width, _overlay.Height);
+            bool absolute = (_mode.SelectedIndex == 1);
+            Rectangle canvas = new Rectangle(0, 0, target.Width, target.Height);
 
             Bitmap effect = ImageFilters.Clone(target);
+            Bitmap mask = new Bitmap(target.Width, target.Height, PixelFormat.Format32bppArgb);
             using (Graphics g = Graphics.FromImage(effect))
+            using (Graphics gm = Graphics.FromImage(mask))
+            using (SolidBrush brush = new SolidBrush(Color.FromArgb(255, 255, 255, 255)))
             {
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                gm.Clear(Color.Transparent);
                 for (int i = 0; i < _list.Count; i++)
                 {
-                    Rectangle sc = new Rectangle(
-                        (int)Math.Round(_list[i].X * scale), (int)Math.Round(_list[i].Y * scale),
-                        (int)Math.Round(_list[i].Width * scale), (int)Math.Round(_list[i].Height * scale));
-                    Rectangle src = ImageUtil.MapRegion(sc, targetSize, overlaySize);
-                    src = Rectangle.Intersect(src, new Rectangle(0, 0, _overlay.Width, _overlay.Height));
-                    if (src.Width < 1 || src.Height < 1) { continue; }
-                    Rectangle dest = ImageUtil.MapRegion(src, overlaySize, targetSize);
-                    g.DrawImage(_overlay, dest, src, GraphicsUnit.Pixel);
-                }
-            }
-
-            Bitmap mask = new Bitmap(target.Width, target.Height, PixelFormat.Format32bppArgb);
-            using (Graphics g = Graphics.FromImage(mask))
-            {
-                g.Clear(Color.Transparent);
-                using (SolidBrush brush = new SolidBrush(Color.FromArgb(255, 255, 255, 255)))
-                {
-                    for (int i = 0; i < _list.Count; i++)
+                    Rectangle region = _list[i];
+                    Rectangle src, paint;
+                    if (absolute)
                     {
-                        Rectangle r = new Rectangle(
-                            (int)Math.Round(_list[i].X * scale), (int)Math.Round(_list[i].Y * scale),
-                            (int)Math.Round(_list[i].Width * scale), (int)Math.Round(_list[i].Height * scale));
-                        g.FillRectangle(brush, r);
+                        src = Rectangle.Intersect(region, overlayRect);
+                        if (src.Width < 1 || src.Height < 1) { continue; }
+                        paint = new Rectangle(region.X, region.Y, src.Width, src.Height);
                     }
+                    else
+                    {
+                        src = ImageUtil.MapRegion(region, sourceSize, overlaySize);
+                        src = Rectangle.Intersect(src, overlayRect);
+                        if (src.Width < 1 || src.Height < 1) { continue; }
+                        paint = ImageUtil.MapRegion(src, overlaySize, sourceSize);
+                    }
+                    Rectangle dest = new Rectangle(
+                        (int)Math.Round(paint.X * scale), (int)Math.Round(paint.Y * scale),
+                        (int)Math.Round(paint.Width * scale), (int)Math.Round(paint.Height * scale));
+                    if (dest.Width < 1 || dest.Height < 1) { continue; }
+                    Rectangle clipped = Rectangle.Intersect(dest, canvas);
+                    if (clipped.Width < 1 || clipped.Height < 1) { continue; }
+                    g.DrawImage(_overlay, dest, src, GraphicsUnit.Pixel);
+                    gm.FillRectangle(brush, clipped);
                 }
             }
             int feather = Math.Max(0, (int)Math.Round(_feather.Value * scale));

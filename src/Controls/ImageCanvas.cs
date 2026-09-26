@@ -20,12 +20,17 @@ namespace ImageToolbox
         private bool _painting;
         private bool _hovering;
         private Point _hoverPoint;
+        private bool _dragEnabled;
+        private bool _movingImage;
 
         public event EventHandler SelectionChanged;
         public event Action<Point> PixelClicked;
         public event Action<Point> BrushStarted;
         public event Action<Point> BrushMoved;
         public event Action BrushFinished;
+        public event Action<Point> DragStarted;
+        public event Action<Point> DragMoved;
+        public event Action DragFinished;
 
         public ImageCanvas()
         {
@@ -66,6 +71,18 @@ namespace ImageToolbox
             set
             {
                 _brushRadius = value < 1 ? 1 : value;
+                Invalidate();
+            }
+        }
+
+        // 拖动移动模式：鼠标按下拖动时报告图片像素坐标，用于移动当前图层。
+        public bool DragEnabled
+        {
+            get { return _dragEnabled; }
+            set
+            {
+                _dragEnabled = value;
+                Cursor = value ? Cursors.SizeAll : Cursors.Default;
                 Invalidate();
             }
         }
@@ -229,6 +246,17 @@ namespace ImageToolbox
             _hovering = true;
             _hoverPoint = ControlToImage(e.Location);
 
+            if (_dragEnabled)
+            {
+                _movingImage = true;
+                Capture = true;
+                if (DragStarted != null)
+                {
+                    DragStarted(_hoverPoint);
+                }
+                return;
+            }
+
             if (_brushEnabled)
             {
                 if (_readOnly)
@@ -270,6 +298,15 @@ namespace ImageToolbox
             _hovering = true;
             _hoverPoint = ControlToImage(e.Location);
 
+            if (_dragEnabled)
+            {
+                if (_movingImage && DragMoved != null)
+                {
+                    DragMoved(_hoverPoint);
+                }
+                return;
+            }
+
             if (_brushEnabled)
             {
                 if (_painting && !_readOnly)
@@ -300,6 +337,20 @@ namespace ImageToolbox
 
             if (_image == null)
             {
+                return;
+            }
+
+            if (_dragEnabled)
+            {
+                if (_movingImage)
+                {
+                    _movingImage = false;
+                    Capture = false;
+                    if (DragFinished != null)
+                    {
+                        DragFinished();
+                    }
+                }
                 return;
             }
 

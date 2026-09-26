@@ -171,11 +171,16 @@ namespace ImageToolbox
             EditLayer upper = _layers[i];
             EditLayer lower = _layers[i - 1];
             Bitmap before = lower.Image;
-            Bitmap after = Register(ImageBlend.Composite(lower.Image, upper.Image, upper.Mode, upper.Opacity));
+            Point beforeOffset = lower.Offset;
+            bool ownBase = (lower.Offset.X != 0 || lower.Offset.Y != 0);
+            Bitmap baseImage = ownBase ? Positioned(lower.Image, lower.Offset) : lower.Image;
+            Bitmap after = Register(ImageBlend.Composite(baseImage, upper.Image, upper.Mode, upper.Opacity, upper.Offset.X, upper.Offset.Y));
+            if (ownBase) { baseImage.Dispose(); }
             lower.Image = after;
+            lower.Offset = Point.Empty;
             _layers.RemoveAt(i);
             _active = i - 1;
-            Push(new MergeDownCommand(lower, upper, before, after, i - 1, i));
+            Push(new MergeDownCommand(lower, upper, before, beforeOffset, after, i - 1, i));
             BumpPreview();
         }
 
@@ -220,6 +225,15 @@ namespace ImageToolbox
             if (opacity > 1f) { opacity = 1f; }
             if (layer == null || layer.Opacity == opacity) { return; }
             PushProps(layer, delegate { layer.Opacity = opacity; });
+        }
+
+        public void CommitOffset(EditLayer layer, Point before)
+        {
+            if (layer == null) { return; }
+            Point after = layer.Offset;
+            if (before == after) { return; }
+            Push(new MoveCommand(layer, before, after));
+            BumpPreview();
         }
 
         public void Rename(EditLayer layer, string name)
@@ -274,7 +288,7 @@ namespace ImageToolbox
                 EditLayer layer = _layers[i];
                 if (!layer.Visible || layer.Opacity <= 0f || layer.Image == null) { continue; }
                 Bitmap source = (i == layerIndex && replacement != null) ? replacement : layer.Image;
-                Bitmap next = ImageBlend.Composite(acc, source, layer.Mode, layer.Opacity);
+                Bitmap next = ImageBlend.Composite(acc, source, layer.Mode, layer.Opacity, layer.Offset.X, layer.Offset.Y);
                 acc.Dispose();
                 acc = next;
             }
@@ -296,16 +310,19 @@ namespace ImageToolbox
                 if (!layer.Visible || layer.Opacity <= 0f || layer.Image == null) { continue; }
                 Bitmap part = (i == layerIndex && replacement != null) ? replacement : PreviewOf(layer, maxSize);
                 if (part == null) { continue; }
+                float s = (float)part.Width / _width;
+                int offX = (int)Math.Round(layer.Offset.X * s);
+                int offY = (int)Math.Round(layer.Offset.Y * s);
                 if (acc == null)
                 {
                     Bitmap transparent = new Bitmap(part.Width, part.Height, PixelFormat.Format32bppArgb);
-                    Bitmap first = ImageBlend.Composite(transparent, part, layer.Mode, layer.Opacity);
+                    Bitmap first = ImageBlend.Composite(transparent, part, layer.Mode, layer.Opacity, offX, offY);
                     transparent.Dispose();
                     acc = first;
                 }
                 else
                 {
-                    Bitmap next = ImageBlend.Composite(acc, part, layer.Mode, layer.Opacity);
+                    Bitmap next = ImageBlend.Composite(acc, part, layer.Mode, layer.Opacity, offX, offY);
                     acc.Dispose();
                     acc = next;
                 }
@@ -457,6 +474,7 @@ namespace ImageToolbox
                 state.Visible = layer.Visible;
                 state.Mode = layer.Mode;
                 state.Opacity = layer.Opacity;
+                state.Offset = layer.Offset;
                 list.Add(state);
             }
             return list;
@@ -472,6 +490,7 @@ namespace ImageToolbox
                 state.Layer.Visible = state.Visible;
                 state.Layer.Mode = state.Mode;
                 state.Layer.Opacity = state.Opacity;
+                state.Layer.Offset = state.Offset;
                 _layers.Add(state.Layer);
             }
             _width = w;
@@ -507,6 +526,19 @@ namespace ImageToolbox
         {
             if (bmp != null) { _knownBitmaps.Add(bmp); }
             return bmp;
+        }
+
+        private Bitmap Positioned(Bitmap source, Point offset)
+        {
+            Bitmap dst = new Bitmap(_width, _height, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(dst))
+            {
+                g.Clear(Color.Transparent);
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(source, offset.X, offset.Y, source.Width, source.Height);
+            }
+            return dst;
         }
 
         private Bitmap FitToCanvas(Bitmap image)
@@ -568,6 +600,7 @@ namespace ImageToolbox
         public bool Visible;
         public BlendMode Mode;
         public float Opacity;
+        public Point Offset;
     }
 
     internal abstract class EditCommand
@@ -603,14 +636,16 @@ namespace ImageToolbox
         private readonly EditLayer _upper;
         private readonly Bitmap _before;
         private readonly Bitmap _after;
+        private readonly Point _beforeOffset;
         private readonly int _lowerIndex;
         private readonly int _upperIndex;
 
-        public MergeDownCommand(EditLayer lower, EditLayer upper, Bitmap before, Bitmap after, int lowerIndex, int upperIndex)
+        public MergeDownCommand(EditLayer lower, EditLayer upper, Bitmap before, Point beforeOffset, Bitmap after, int lowerIndex, int upperIndex)
         {
             _lower = lower;
             _upper = upper;
             _before = before;
+            _beforeOffset = beforeOffset;
             _after = after;
             _lowerIndex = lowerIndex;
             _upperIndex = upperIndex;
@@ -619,6 +654,7 @@ namespace ImageToolbox
         public override void Undo(EditSession session)
         {
             _lower.Image = _before;
+            _lower.Offset = _beforeOffset;
             session.InsertLayerRaw(_upper, _upperIndex);
             session.SetActiveRaw(_lowerIndex);
         }
@@ -626,12 +662,30 @@ namespace ImageToolbox
         public override void Redo(EditSession session)
         {
             _lower.Image = _after;
+            _lower.Offset = Point.Empty;
             session.RemoveLayerRaw(_upper);
             session.SetActiveRaw(_lowerIndex);
         }
 
         public override void CollectBitmaps(List<Bitmap> list) { list.Add(_before); list.Add(_after); }
         public override bool References(Bitmap bmp) { return bmp == _before || bmp == _after; }
+    }
+
+    internal class MoveCommand : EditCommand
+    {
+        private readonly EditLayer _layer;
+        private readonly Point _before;
+        private readonly Point _after;
+
+        public MoveCommand(EditLayer layer, Point before, Point after)
+        {
+            _layer = layer;
+            _before = before;
+            _after = after;
+        }
+
+        public override void Undo(EditSession session) { _layer.Offset = _before; }
+        public override void Redo(EditSession session) { _layer.Offset = _after; }
     }
 
     internal class StructureCommand : EditCommand

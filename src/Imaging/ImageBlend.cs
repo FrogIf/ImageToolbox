@@ -101,6 +101,12 @@ namespace ImageToolbox
         // 正确的 source-over 合成：保留底图透明度，图层被移除/隐藏后能正确透出棋盘格。
         public static Bitmap Composite(Bitmap baseImage, Bitmap overlay, BlendMode mode, float opacity)
         {
+            return Composite(baseImage, overlay, mode, opacity, 0, 0);
+        }
+
+        // 带偏移的合成：把 overlay 平移到 (offsetX, offsetY) 后再叠加（用于移动图层时的实时预览）。
+        public static Bitmap Composite(Bitmap baseImage, Bitmap overlay, BlendMode mode, float opacity, int offsetX, int offsetY)
+        {
             int w = baseImage.Width;
             int h = baseImage.Height;
             if (opacity < 0f) { opacity = 0f; }
@@ -108,7 +114,19 @@ namespace ImageToolbox
 
             Bitmap scaled = overlay;
             bool own = false;
-            if (overlay.Width != w || overlay.Height != h)
+            if (offsetX != 0 || offsetY != 0)
+            {
+                scaled = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                using (Graphics g = Graphics.FromImage(scaled))
+                {
+                    g.Clear(Color.Transparent);
+                    g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                    g.PixelOffsetMode = PixelOffsetMode.Half;
+                    g.DrawImage(overlay, offsetX, offsetY, overlay.Width, overlay.Height);
+                }
+                own = true;
+            }
+            else if (overlay.Width != w || overlay.Height != h)
             {
                 scaled = new Bitmap(w, h, PixelFormat.Format32bppArgb);
                 using (Graphics g = Graphics.FromImage(scaled))

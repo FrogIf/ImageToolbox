@@ -18,9 +18,32 @@ namespace ImageToolbox
         private Button _up;
         private Button _down;
         private Button _merge;
+        private CheckBox _move;
         private bool _updating;
 
         public event EventHandler LayersChanged;
+        public event Action<bool> MoveModeChanged;
+
+        public bool MoveMode
+        {
+            get { return _move != null && _move.Checked; }
+        }
+
+        public void SetMoveMode(bool on)
+        {
+            if (_move != null && _move.Checked != on)
+            {
+                _move.Checked = on;
+            }
+        }
+
+        private void RaiseMoveMode()
+        {
+            if (MoveModeChanged != null)
+            {
+                MoveModeChanged(_move.Checked);
+            }
+        }
 
         public LayerPanel()
         {
@@ -52,12 +75,24 @@ namespace ImageToolbox
             _list.IntegralHeight = false;
             _list.SelectedIndexChanged += delegate { SelectLayer(); };
 
+            Panel titleBar = new Panel();
+            titleBar.Dock = DockStyle.Top;
+            titleBar.Height = 28;
+
             Label title = new Label();
             title.Text = "图层";
             title.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
-            title.Dock = DockStyle.Top;
-            title.Height = 24;
-            title.TextAlign = ContentAlignment.MiddleLeft;
+            title.Location = new Point(2, 4);
+            title.AutoSize = true;
+            titleBar.Controls.Add(title);
+
+            _move = new CheckBox();
+            _move.Appearance = Appearance.Button;
+            _move.Text = "移动";
+            _move.Dock = DockStyle.Right;
+            _move.Width = 54;
+            _move.CheckedChanged += delegate { RaiseMoveMode(); };
+            titleBar.Controls.Add(_move);
 
             FlowLayoutPanel bar = new FlowLayoutPanel();
             bar.Dock = DockStyle.Fill;
@@ -74,7 +109,7 @@ namespace ImageToolbox
             MakeBar(bar, "拼合", delegate { Run(delegate { _session.Flatten(); }); });
 
             top.Controls.Add(bar);
-            top.Controls.Add(title);
+            top.Controls.Add(titleBar);
 
             _visible = new CheckBox();
             _visible.Text = "显示";
@@ -277,6 +312,7 @@ namespace ImageToolbox
                 _up.Enabled = false;
                 _down.Enabled = false;
                 _merge.Enabled = false;
+                _move.Enabled = false;
                 return;
             }
             int i = _session.ActiveIndex;
@@ -285,6 +321,7 @@ namespace ImageToolbox
             _up.Enabled = i >= 0 && i < n - 1;
             _down.Enabled = i > 0;
             _merge.Enabled = i > 0;
+            _move.Enabled = _session.HasImage;
         }
 
         private void UpdateRowText()

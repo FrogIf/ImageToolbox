@@ -10,6 +10,7 @@ namespace ImageToolbox
         public bool Visible;
         public BlendMode Mode;
         public float Opacity;
+        public Point Offset;
 
         public EditLayer(string name, Bitmap image)
         {
@@ -18,6 +19,7 @@ namespace ImageToolbox
             Visible = true;
             Mode = BlendMode.Normal;
             Opacity = 1f;
+            Offset = Point.Empty;
         }
 
         public EditLayer Clone()
@@ -26,6 +28,7 @@ namespace ImageToolbox
             copy.Visible = Visible;
             copy.Mode = Mode;
             copy.Opacity = Opacity;
+            copy.Offset = Offset;
             return copy;
         }
 
