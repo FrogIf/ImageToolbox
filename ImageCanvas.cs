@@ -15,9 +15,17 @@ namespace ImageToolbox
         private RectangleF _imageRect;
         private float _scale;
         private float _lockAspect;
+        private bool _brushEnabled;
+        private int _brushRadius;
+        private bool _painting;
+        private bool _hovering;
+        private Point _hoverPoint;
 
         public event EventHandler SelectionChanged;
         public event Action<Point> PixelClicked;
+        public event Action<Point> BrushStarted;
+        public event Action<Point> BrushMoved;
+        public event Action BrushFinished;
 
         public ImageCanvas()
         {
@@ -40,6 +48,26 @@ namespace ImageToolbox
         {
             get { return _lockAspect; }
             set { _lockAspect = value; }
+        }
+
+        public bool BrushEnabled
+        {
+            get { return _brushEnabled; }
+            set
+            {
+                _brushEnabled = value;
+                Invalidate();
+            }
+        }
+
+        public int BrushRadius
+        {
+            get { return _brushRadius; }
+            set
+            {
+                _brushRadius = value < 1 ? 1 : value;
+                Invalidate();
+            }
         }
 
         public Rectangle Selection
@@ -96,6 +124,18 @@ namespace ImageToolbox
                     e.Graphics.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
                 }
             }
+
+            if (_brushEnabled && _hovering)
+            {
+                float radius = _brushRadius * _scale;
+                PointF center = ImagePointToControl(_hoverPoint);
+                using (Pen pen = new Pen(Color.FromArgb(220, 0, 0, 0), 2f))
+                using (Pen pen2 = new Pen(Color.FromArgb(220, 255, 255, 255), 1f))
+                {
+                    e.Graphics.DrawEllipse(pen, center.X - radius, center.Y - radius, radius * 2f, radius * 2f);
+                    e.Graphics.DrawEllipse(pen2, center.X - radius, center.Y - radius, radius * 2f, radius * 2f);
+                }
+            }
         }
 
         private void ComputeLayout()
@@ -136,16 +176,46 @@ namespace ImageToolbox
                 rect.Height * _scale);
         }
 
+        private PointF ImagePointToControl(Point point)
+        {
+            return new PointF(_imageRect.X + point.X * _scale, _imageRect.Y + point.Y * _scale);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (_readOnly || _image == null || e.Button != MouseButtons.Left)
+            if (_image == null || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            _hovering = true;
+            _hoverPoint = ControlToImage(e.Location);
+
+            if (_brushEnabled)
+            {
+                if (_readOnly)
+                {
+                    Invalidate();
+                    return;
+                }
+                _painting = true;
+                Capture = true;
+                Invalidate();
+                if (BrushStarted != null)
+                {
+                    BrushStarted(_hoverPoint);
+                }
+                return;
+            }
+
+            if (_readOnly)
             {
                 return;
             }
 
             _dragging = true;
-            _dragStart = ControlToImage(e.Location);
+            _dragStart = _hoverPoint;
             _selection = new Rectangle(_dragStart, Size.Empty);
             Capture = true;
             Invalidate();
@@ -154,13 +224,36 @@ namespace ImageToolbox
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+
+            if (_image == null)
+            {
+                return;
+            }
+
+            _hovering = true;
+            _hoverPoint = ControlToImage(e.Location);
+
+            if (_brushEnabled)
+            {
+                if (_painting && !_readOnly)
+                {
+                    Invalidate();
+                    if (BrushMoved != null)
+                    {
+                        BrushMoved(_hoverPoint);
+                    }
+                    return;
+                }
+                Invalidate();
+                return;
+            }
+
             if (!_dragging)
             {
                 return;
             }
 
-            Point current = ControlToImage(e.Location);
-            _selection = MakeRectangle(_dragStart, current, _lockAspect);
+            _selection = MakeRectangle(_dragStart, _hoverPoint, _lockAspect);
             Invalidate();
         }
 
@@ -168,7 +261,28 @@ namespace ImageToolbox
         {
             base.OnMouseUp(e);
 
-            if (_image != null && e.Button == MouseButtons.Left && PixelClicked != null)
+            if (_image == null)
+            {
+                return;
+            }
+
+            if (_brushEnabled)
+            {
+                if (!_painting)
+                {
+                    return;
+                }
+                _painting = false;
+                Capture = false;
+                Invalidate();
+                if (BrushFinished != null)
+                {
+                    BrushFinished();
+                }
+                return;
+            }
+
+            if (e.Button == MouseButtons.Left && PixelClicked != null)
             {
                 PixelClicked(ControlToImage(e.Location));
             }
@@ -190,6 +304,16 @@ namespace ImageToolbox
             if (SelectionChanged != null)
             {
                 SelectionChanged(this, EventArgs.Empty);
+            }
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (_hovering)
+            {
+                _hovering = false;
+                Invalidate();
             }
         }
 

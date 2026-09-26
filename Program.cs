@@ -35,6 +35,8 @@ namespace ImageToolbox
             AddTool(new IdPhotoPage());
             AddTool(new LocalOverlayPage());
             AddTool(new StyleAdjustPage());
+            AddTool(new EffectsPage());
+            AddTool(new BrushBlurPage());
             AddTool(new ImageAdjustPage());
             AddTool(new ColorMatchPage());
         }
