@@ -30,6 +30,9 @@ namespace ImageToolbox
             Controls.Add(_tabs);
 
             AddTool(new BatchProcessPage());
+            AddTool(new CropComposePage());
+            AddTool(new SliceCollagePage());
+            AddTool(new IdPhotoPage());
             AddTool(new LocalOverlayPage());
             AddTool(new StyleAdjustPage());
             AddTool(new ColorMatchPage());

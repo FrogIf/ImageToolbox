@@ -14,6 +14,7 @@ namespace ImageToolbox
         private Point _dragStart;
         private RectangleF _imageRect;
         private float _scale;
+        private float _lockAspect;
 
         public event EventHandler SelectionChanged;
 
@@ -32,6 +33,12 @@ namespace ImageToolbox
         {
             get { return _readOnly; }
             set { _readOnly = value; }
+        }
+
+        public float LockAspect
+        {
+            get { return _lockAspect; }
+            set { _lockAspect = value; }
         }
 
         public Rectangle Selection
@@ -152,7 +159,7 @@ namespace ImageToolbox
             }
 
             Point current = ControlToImage(e.Location);
-            _selection = MakeRectangle(_dragStart, current);
+            _selection = MakeRectangle(_dragStart, current, _lockAspect);
             Invalidate();
         }
 
@@ -179,13 +186,32 @@ namespace ImageToolbox
             }
         }
 
-        private static Rectangle MakeRectangle(Point a, Point b)
+        private static Rectangle MakeRectangle(Point a, Point b, float aspect)
         {
-            int x = Math.Min(a.X, b.X);
-            int y = Math.Min(a.Y, b.Y);
-            int w = Math.Abs(a.X - b.X);
-            int h = Math.Abs(a.Y - b.Y);
-            return new Rectangle(x, y, w, h);
+            int dx = b.X - a.X;
+            int dy = b.Y - a.Y;
+
+            if (aspect > 0f)
+            {
+                int w = Math.Abs(dx);
+                int h = Math.Abs(dy);
+                if (h == 0 || (w > 0 && w / (float)h > aspect))
+                {
+                    h = Math.Max(1, (int)Math.Round(w / aspect));
+                }
+                else
+                {
+                    w = Math.Max(1, (int)Math.Round(h * aspect));
+                }
+                dx = dx < 0 ? -w : w;
+                dy = dy < 0 ? -h : h;
+            }
+
+            int x = Math.Min(a.X, a.X + dx);
+            int y = Math.Min(a.Y, a.Y + dy);
+            int width = Math.Abs(dx);
+            int height = Math.Abs(dy);
+            return new Rectangle(x, y, width, height);
         }
     }
 }
