@@ -102,6 +102,8 @@ namespace ImageToolbox
 
             ComputeLayout();
 
+            DrawChecker(e.Graphics, _imageRect);
+
             e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
             e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             e.Graphics.DrawImage(_image, _imageRect);
@@ -135,6 +137,41 @@ namespace ImageToolbox
                     e.Graphics.DrawEllipse(pen, center.X - radius, center.Y - radius, radius * 2f, radius * 2f);
                     e.Graphics.DrawEllipse(pen2, center.X - radius, center.Y - radius, radius * 2f, radius * 2f);
                 }
+            }
+        }
+
+        private static Bitmap _checker;
+
+        private static Bitmap CheckerTile()
+        {
+            if (_checker == null)
+            {
+                int cell = 8;
+                _checker = new Bitmap(cell * 2, cell * 2);
+                using (Graphics g = Graphics.FromImage(_checker))
+                {
+                    g.Clear(Color.FromArgb(255, 255, 255, 255));
+                    using (SolidBrush brush = new SolidBrush(Color.FromArgb(255, 205, 205, 205)))
+                    {
+                        g.FillRectangle(brush, 0, 0, cell, cell);
+                        g.FillRectangle(brush, cell, cell, cell, cell);
+                    }
+                }
+            }
+            return _checker;
+        }
+
+        private static void DrawChecker(Graphics g, RectangleF rect)
+        {
+            if (rect.Width <= 0f || rect.Height <= 0f)
+            {
+                return;
+            }
+            using (TextureBrush brush = new TextureBrush(CheckerTile()))
+            {
+                brush.WrapMode = WrapMode.Tile;
+                brush.TranslateTransform(rect.X, rect.Y);
+                g.FillRectangle(brush, rect);
             }
         }
 

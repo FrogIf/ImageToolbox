@@ -29,22 +29,13 @@ namespace ImageToolbox
             _tabs.Dock = DockStyle.Fill;
             Controls.Add(_tabs);
 
-            AddTool(new BatchProcessPage());
-            AddTool(new CropComposePage());
-            AddTool(new SliceCollagePage());
-            AddTool(new IdPhotoPage());
-            AddTool(new LocalOverlayPage());
-            AddTool(new StyleAdjustPage());
-            AddTool(new EffectsPage());
-            AddTool(new BrushBlurPage());
-            AddTool(new ImageAdjustPage());
-            AddTool(new ColorMatchPage());
-            AddTool(new ImageInfoPage());
-            AddTool(new ImageComparePage());
-            AddTool(new LayerComposePage());
-            AddTool(new MattingPage());
-            AddTool(new ColorToolPage());
-            AddTool(new MultiSizeExportPage());
+            AddTool(new ToolHostPage("批处理", new ToolPage[]
+            {
+                new BatchProcessPage(),
+                new MultiSizeExportPage()
+            }));
+
+            AddTool(new SingleEditPage());
         }
 
         public void AddTool(ToolPage tool)
