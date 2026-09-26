@@ -17,6 +17,7 @@ namespace ImageToolbox
         private float _lockAspect;
 
         public event EventHandler SelectionChanged;
+        public event Action<Point> PixelClicked;
 
         public ImageCanvas()
         {
@@ -166,6 +167,12 @@ namespace ImageToolbox
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+
+            if (_image != null && e.Button == MouseButtons.Left && PixelClicked != null)
+            {
+                PixelClicked(ControlToImage(e.Location));
+            }
+
             if (!_dragging)
             {
                 return;
