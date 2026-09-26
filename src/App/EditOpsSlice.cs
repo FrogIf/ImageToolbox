@@ -17,6 +17,11 @@ namespace ImageToolbox
         private List<Bitmap> _extra = new List<Bitmap>();
         private static readonly Color[] BgColors = { Color.White, Color.Black, Color.FromArgb(240, 240, 240), Color.Transparent };
 
+        public override bool DocumentLevel
+        {
+            get { return true; }
+        }
+
         public SliceCollageOp()
         {
             EditOpUi.Title(this, "切图拼图", 10);

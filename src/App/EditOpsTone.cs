@@ -349,6 +349,11 @@ namespace ImageToolbox
         private static readonly Color[] FillColors = { Color.Transparent, Color.White, Color.Black, Color.FromArgb(240, 240, 240) };
         private bool _initSize;
 
+        public override bool DocumentLevel
+        {
+            get { return true; }
+        }
+
         public CanvasOp()
         {
             EditOpUi.Title(this, "画布 / 校正", 10);

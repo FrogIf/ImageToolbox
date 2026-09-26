@@ -29,6 +29,13 @@ namespace ImageToolbox
             get { return false; }
         }
 
+        // true 表示该操作作用于整张文档（裁剪/画布/证件照/切图等会改变尺寸），
+        // 编辑器会把合成结果作为 Source，应用时替换整个文档而不是当前图层。
+        public virtual bool DocumentLevel
+        {
+            get { return false; }
+        }
+
         public virtual string Hint
         {
             get { return ""; }

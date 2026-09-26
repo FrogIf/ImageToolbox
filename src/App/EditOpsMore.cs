@@ -522,6 +522,11 @@ namespace ImageToolbox
             get { return true; }
         }
 
+        public override bool DocumentLevel
+        {
+            get { return true; }
+        }
+
         private void Do(int mode)
         {
             _pending = mode;
@@ -650,6 +655,11 @@ namespace ImageToolbox
             Controls.Add(_cut);
             EditOpUi.Note(this, "单张证件照会替换当前图；排版到相纸输出整张相纸。", 392, 48);
             UpdateMode();
+        }
+
+        public override bool DocumentLevel
+        {
+            get { return true; }
         }
 
         private void UpdateMode()
@@ -990,177 +1000,6 @@ namespace ImageToolbox
         {
             if (Source == null) { return null; }
             return Compose(Source);
-        }
-    }
-
-    public class LayerComposeOp : EditOpPanel
-    {
-        private class Layer
-        {
-            public string Path;
-            public Bitmap Image;
-            public BlendMode Mode = BlendMode.Normal;
-            public float Opacity = 1f;
-        }
-
-        private ListBox _listBox;
-        private ComboBox _mode;
-        private TrackBar _opacity;
-        private Label _opacityV;
-        private List<Layer> _layers = new List<Layer>();
-        private bool _sync;
-
-        public LayerComposeOp()
-        {
-            EditOpUi.Title(this, "图层合成", 10);
-            EditOpUi.Button(this, "添加图层", 10, 40, 100, delegate { Add(); });
-            EditOpUi.Button(this, "移除", 118, 40, 70, delegate { Remove(); });
-            EditOpUi.Button(this, "上移", 196, 40, 50, delegate { MoveLayer(-1); });
-            EditOpUi.Button(this, "下移", 252, 40, 50, delegate { MoveLayer(1); });
-
-            _listBox = new ListBox();
-            _listBox.Location = new Point(10, 78);
-            _listBox.Size = new Size(290, 120);
-            _listBox.IntegralHeight = false;
-            _listBox.SelectedIndexChanged += delegate { SyncLayer(); };
-            Controls.Add(_listBox);
-
-            EditOpUi.Caption(this, "混合模式", 208);
-            _mode = EditOpUi.Combo(this, 228, ImageBlend.ModeNames, 0);
-            _mode.SelectedIndexChanged += delegate { ApplyLayerProp(); };
-            _opacity = EditOpUi.Slider(this, "不透明", 264, 0, 100, 100, out _opacityV);
-            _opacity.ValueChanged += delegate { _opacityV.Text = _opacity.Value + "%"; ApplyLayerProp(); };
-            EditOpUi.Note(this, "图层自下而上叠加到当前图，自动缩放到相同尺寸。", 302, 40);
-        }
-
-        private void Add()
-        {
-            if (Source == null) { return; }
-            OpenFileDialog dialog = new OpenFileDialog();
-            dialog.Title = "选择图层图片";
-            dialog.Filter = "图片文件|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp;*.tif;*.tiff|所有文件|*.*";
-            dialog.Multiselect = true;
-            if (dialog.ShowDialog(this) != DialogResult.OK) { return; }
-            try
-            {
-                for (int i = 0; i < dialog.FileNames.Length; i++)
-                {
-                    Layer layer = new Layer();
-                    layer.Path = dialog.FileNames[i];
-                    layer.Image = ImageUtil.LoadImage(dialog.FileNames[i]);
-                    _layers.Add(layer);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, "无法加载图层：" + ex.Message);
-            }
-            Refresh(_layers.Count - 1);
-            RaisePreview();
-        }
-
-        private void Remove()
-        {
-            int i = _listBox.SelectedIndex;
-            if (i < 0 || i >= _layers.Count) { return; }
-            if (_layers[i].Image != null) { _layers[i].Image.Dispose(); }
-            _layers.RemoveAt(i);
-            Refresh(Math.Min(i, _layers.Count - 1));
-            RaisePreview();
-        }
-
-        private void MoveLayer(int delta)
-        {
-            int i = _listBox.SelectedIndex;
-            int j = i + delta;
-            if (i < 0 || j < 0 || j >= _layers.Count) { return; }
-            Layer t = _layers[i];
-            _layers[i] = _layers[j];
-            _layers[j] = t;
-            Refresh(j);
-            RaisePreview();
-        }
-
-        private void Refresh(int select)
-        {
-            _sync = true;
-            _listBox.Items.Clear();
-            for (int i = 0; i < _layers.Count; i++)
-            {
-                _listBox.Items.Add((i + 1) + ". " + Path.GetFileName(_layers[i].Path));
-            }
-            if (select >= 0 && select < _layers.Count) { _listBox.SelectedIndex = select; }
-            _sync = false;
-            SyncLayer();
-        }
-
-        private void SyncLayer()
-        {
-            int i = _listBox.SelectedIndex;
-            bool has = i >= 0 && i < _layers.Count;
-            _mode.Enabled = has;
-            _opacity.Enabled = has;
-            if (!has) { return; }
-            _sync = true;
-            _mode.SelectedIndex = (int)_layers[i].Mode;
-            _opacity.Value = (int)Math.Round(_layers[i].Opacity * 100f);
-            _opacityV.Text = _opacity.Value + "%";
-            _sync = false;
-        }
-
-        private void ApplyLayerProp()
-        {
-            if (_sync) { return; }
-            int i = _listBox.SelectedIndex;
-            if (i < 0 || i >= _layers.Count) { return; }
-            _layers[i].Mode = (BlendMode)Math.Max(0, _mode.SelectedIndex);
-            _layers[i].Opacity = _opacity.Value / 100f;
-            RaisePreview();
-        }
-
-        public override void DisposeResources()
-        {
-            for (int i = 0; i < _layers.Count; i++)
-            {
-                if (_layers[i].Image != null) { _layers[i].Image.Dispose(); }
-            }
-            _layers.Clear();
-            _listBox.Items.Clear();
-        }
-
-        protected override void OnResetState()
-        {
-            for (int i = 0; i < _layers.Count; i++)
-            {
-                if (_layers[i].Image != null) { _layers[i].Image.Dispose(); }
-            }
-            _layers.Clear();
-            _listBox.Items.Clear();
-        }
-
-        private Bitmap Composite(Bitmap baseImage)
-        {
-            if (_layers.Count == 0) { return null; }
-            Bitmap current = ImageFilters.Clone(baseImage);
-            for (int i = 0; i < _layers.Count; i++)
-            {
-                Bitmap next = ImageBlend.Blend(current, _layers[i].Image, _layers[i].Mode, _layers[i].Opacity);
-                current.Dispose();
-                current = next;
-            }
-            return current;
-        }
-
-        public override Bitmap RenderPreview()
-        {
-            if (PreviewSource == null) { return null; }
-            return Composite(PreviewSource);
-        }
-
-        public override Bitmap BuildResult()
-        {
-            if (Source == null) { return null; }
-            return Composite(Source);
         }
     }
 
