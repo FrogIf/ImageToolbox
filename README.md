@@ -51,48 +51,53 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 ```
 ImageToolbox/
-├── ToolPage.cs         # 工具页抽象基类（ToolName / Shutdown）
-├── Program.cs          # 主窗口外壳（TabControl）+ 程序入口
-├── BatchProcessPage.cs # “批量处理”工具页
-├── CropComposePage.cs  # “裁剪构图”工具页
-├── SliceCollagePage.cs # “切图拼图”工具页
-├── IdPhotoPage.cs      # “证件照”工具页
-├── LocalOverlayPage.cs # “局部覆盖”工具页
-├── StyleAdjustPage.cs  # “风格调整”工具页
-├── EffectsPage.cs      # “特效”工具页
-├── BrushBlurPage.cs    # “画笔打码”工具页
-├── ImageAdjustPage.cs  # “图像调整”工具页
-├── ColorMatchPage.cs   # “取色配色”工具页
-├── ImageInfoPage.cs    # “图片信息”工具页
-├── ImageComparePage.cs # “图像对比”工具页
-├── LayerComposePage.cs # “图层合成”工具页
-├── MattingPage.cs      # “抠图”工具页
-├── ColorToolPage.cs    # “颜色工具”工具页
-├── MultiSizeExportPage.cs # “批量导出”工具页
-├── ImageCanvas.cs      # 可框选（支持固定比例、点击取样）的图片显示控件
-├── HistogramView.cs    # 直方图显示控件
-├── CurveEditor.cs      # 曲线编辑控件
-├── ImageEffects.cs     # 色彩矩阵、预设滤镜、空间特效、取色统计
-├── ImageFilters.cs     # 像素级特效（模糊/油画/素描/浮雕/边缘/背景虚化/光晕/圆角/投影）
-├── ImageMeta.cs        # 图片信息 / EXIF 读取 / 去除元数据
-├── ImageCompare.cs     # 对比逻辑（并排/滑块/差异）
-├── ImageBlend.cs       # 图层混合模式
-├── ImageMatting.cs     # 抠图逻辑（颜色阈值/魔术棒）
-├── PaletteExtractor.cs # 中位切分调色板提取、颜色转换
-├── MultiSizeExport.cs  # 多尺寸缩放与 .ico 写入
-├── ImageUtil.cs        # 通用图片加载 / 合成 / 保存（WIC 解码）
-├── ImageBatch.cs       # 批量处理逻辑（格式/缩放/旋转/重命名/水印）
-├── ImageLayout.cs      # 构图逻辑（裁剪/旋转校正/画布/切图/拼图/证件照）
-├── ImageTuning.cs      # 调色逻辑（色阶/曲线/白平衡/HSL/色调/LUT/局部）
+├── src/
+│   ├── App/            # 程序外壳
+│   │   ├── Program.cs          # 主窗口外壳（TabControl）+ 程序入口
+│   │   └── ToolPage.cs         # 工具页抽象基类（ToolName / Shutdown）
+│   ├── Controls/       # 自定义控件
+│   │   ├── ImageCanvas.cs      # 可框选 / 画笔涂抹的图片显示控件
+│   │   ├── HistogramView.cs    # 直方图显示控件
+│   │   └── CurveEditor.cs      # 曲线编辑控件
+│   ├── Imaging/        # 纯逻辑（无 UI 依赖）
+│   │   ├── ImageUtil.cs        # 通用图片加载 / 合成 / 保存（WIC 解码）
+│   │   ├── ImageEffects.cs     # 色彩矩阵、预设滤镜、空间特效、取色统计
+│   │   ├── ImageFilters.cs     # 像素级特效（模糊/油画/素描/浮雕/边缘/背景虚化/光晕/圆角/投影）
+│   │   ├── ImageBatch.cs       # 批量处理逻辑（格式/缩放/旋转/重命名/水印）
+│   │   ├── ImageLayout.cs      # 构图逻辑（裁剪/旋转校正/画布/切图/拼图/证件照）
+│   │   ├── ImageTuning.cs      # 调色逻辑（色阶/曲线/白平衡/HSL/色调/LUT/局部）
+│   │   ├── ImageMeta.cs        # 图片信息 / EXIF 读取 / 去除元数据
+│   │   ├── ImageCompare.cs     # 对比逻辑（并排/滑块/差异）
+│   │   ├── ImageBlend.cs       # 图层混合模式
+│   │   ├── ImageMatting.cs     # 抠图逻辑（颜色阈值/魔术棒）
+│   │   ├── PaletteExtractor.cs # 中位切分调色板提取、颜色转换
+│   │   └── MultiSizeExport.cs  # 多尺寸缩放与 .ico 写入
+│   └── Pages/          # 各工具页（每页一个标签）
+│       ├── BatchProcessPage.cs     # “批量处理”
+│       ├── CropComposePage.cs      # “裁剪构图”
+│       ├── SliceCollagePage.cs     # “切图拼图”
+│       ├── IdPhotoPage.cs          # “证件照”
+│       ├── LocalOverlayPage.cs     # “局部覆盖”
+│       ├── StyleAdjustPage.cs      # “风格调整”
+│       ├── EffectsPage.cs          # “特效”
+│       ├── BrushBlurPage.cs        # “画笔打码”
+│       ├── ImageAdjustPage.cs      # “图像调整”
+│       ├── ColorMatchPage.cs       # “取色配色”
+│       ├── ImageInfoPage.cs        # “图片信息”
+│       ├── ImageComparePage.cs     # “图像对比”
+│       ├── LayerComposePage.cs     # “图层合成”
+│       ├── MattingPage.cs          # “抠图”
+│       ├── ColorToolPage.cs        # “颜色工具”
+│       └── MultiSizeExportPage.cs  # “批量导出”
 ├── app.manifest        # 应用程序清单（DPI 感知）
 ├── app.ico             # 程序图标
-├── build.ps1           # 一键编译脚本
+├── build.ps1           # 一键编译脚本（递归编译 src 下所有 .cs）
 └── 使用说明.md          # 详细使用说明书
 ```
 
 ## 扩展新工具
 
-1. 新建类继承 `ToolPage`，在构造函数里搭建界面：
+1. 在 `src/Pages/` 新建类继承 `ToolPage`，在构造函数里搭建界面：
 
    ```csharp
    public class MyToolPage : ToolPage
@@ -101,7 +106,7 @@ ImageToolbox/
    }
    ```
 
-2. 在 `Program.cs` 的 `MainForm` 构造函数中注册：
+2. 在 `src/App/Program.cs` 的 `MainForm` 构造函数中注册：
 
    ```csharp
    AddTool(new MyToolPage());

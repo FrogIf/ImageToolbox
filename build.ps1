@@ -34,7 +34,7 @@ $args += "/out:`"$out`""
 $args += "/win32manifest:`"$manifest`""
 if (Test-Path $icon) { $args += "/win32icon:`"$icon`"" }
 foreach ($r in $refs) { $args += "/r:`"$r`"" }
-$sources = Get-ChildItem -Path $root -Filter *.cs | ForEach-Object { $_.FullName }
+$sources = Get-ChildItem -Path $root -Recurse -Filter *.cs | ForEach-Object { $_.FullName }
 $args += $sources
 
 & $csc $args

@@ -8,7 +8,18 @@ Windows desktop "图片工具箱" (Image Toolbox): a tabbed shell that hosts mul
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-Output: `ImageToolbox.exe` in the repo root. `build.ps1` compiles every `*.cs` in the repo root, so new source files are picked up automatically. Always rebuild after editing `.cs` files; the `.exe` is committed/present and does not auto-update.
+Output: `ImageToolbox.exe` in the repo root. `build.ps1` compiles every `*.cs` under the repo **recursively** (via `Get-ChildItem -Recurse`), so new source files are picked up automatically regardless of folder. Always rebuild after editing `.cs` files; the `.exe` is committed/present and does not auto-update.
+
+## Layout
+
+Sources live under `src/` (namespace is still flat `ImageToolbox`):
+
+- `src/App/` — `Program.cs` (shell + entrypoint), `ToolPage.cs` (base class).
+- `src/Controls/` — custom `Control`s (`ImageCanvas`, `HistogramView`, `CurveEditor`).
+- `src/Imaging/` — UI-free logic (`ImageUtil`, `ImageEffects`, `ImageFilters`, `ImageBatch`, `ImageLayout`, `ImageTuning`, `ImageMeta`, `ImageCompare`, `ImageBlend`, `ImageMatting`, `PaletteExtractor`, `MultiSizeExport`).
+- `src/Pages/` — one `*Page.cs` per tool tab.
+
+`app.manifest`, `app.ico`, `build.ps1` and the docs stay in the repo root.
 
 ## Toolchain constraints (easy to get wrong)
 
