@@ -21,7 +21,7 @@ namespace ImageToolbox
 
             _curve = new CurveEditor();
             _curve.Location = new Point(10, 100);
-            _curve.Size = new Size(300, 300);
+            _curve.Size = new Size(250, 300);
             _curve.CurveChanged += delegate
             {
                 if (_sync) { return; }

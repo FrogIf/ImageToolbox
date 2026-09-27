@@ -41,7 +41,7 @@ namespace ImageToolbox
             root.Dock = DockStyle.Fill;
             root.ColumnCount = 2;
             root.RowCount = 2;
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340f));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320f));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 74f));
@@ -56,40 +56,40 @@ namespace ImageToolbox
             GroupBox fileGroup = new GroupBox();
             fileGroup.Text = "文件";
             fileGroup.Location = new Point(10, 8);
-            fileGroup.Size = new Size(320, 92);
+            fileGroup.Size = new Size(280, 92);
             left.Controls.Add(fileGroup);
 
             Button addFiles = new Button();
             addFiles.Text = "添加文件";
             addFiles.Location = new Point(10, 22);
-            addFiles.Size = new Size(94, 28);
+            addFiles.Size = new Size(80, 22);
             addFiles.Click += delegate { AddFiles(); };
             fileGroup.Controls.Add(addFiles);
 
             Button addFolder = new Button();
             addFolder.Text = "添加文件夹";
-            addFolder.Location = new Point(110, 22);
-            addFolder.Size = new Size(104, 28);
+            addFolder.Location = new Point(96, 22);
+            addFolder.Size = new Size(94, 22);
             addFolder.Click += delegate { AddFolder(); };
             fileGroup.Controls.Add(addFolder);
 
             Button remove = new Button();
             remove.Text = "移除";
-            remove.Location = new Point(220, 22);
-            remove.Size = new Size(94, 28);
+            remove.Location = new Point(196, 22);
+            remove.Size = new Size(84, 22);
             remove.Click += delegate { RemoveSelected(); };
             fileGroup.Controls.Add(remove);
 
             Button clear = new Button();
             clear.Text = "清空列表";
             clear.Location = new Point(10, 56);
-            clear.Size = new Size(94, 28);
+            clear.Size = new Size(80, 22);
             clear.Click += delegate { _files.Items.Clear(); UpdateStatus(); };
             fileGroup.Controls.Add(clear);
 
             Label fileHint = new Label();
             fileHint.Text = "支持 PNG/JPG/BMP/GIF/WebP/TIFF";
-            fileHint.Location = new Point(112, 62);
+            fileHint.Location = new Point(96, 62);
             fileHint.AutoSize = true;
             fileHint.ForeColor = Color.FromArgb(90, 90, 90);
             fileGroup.Controls.Add(fileHint);
@@ -97,7 +97,7 @@ namespace ImageToolbox
             GroupBox sizeGroup = new GroupBox();
             sizeGroup.Text = "导出尺寸（像素，按方框适配）";
             sizeGroup.Location = new Point(10, 108);
-            sizeGroup.Size = new Size(320, 116);
+            sizeGroup.Size = new Size(280, 116);
             left.Controls.Add(sizeGroup);
 
             _sizeChecks = new CheckBox[_sizeValues.Length];
@@ -115,7 +115,7 @@ namespace ImageToolbox
             GroupBox optionGroup = new GroupBox();
             optionGroup.Text = "选项";
             optionGroup.Location = new Point(10, 232);
-            optionGroup.Size = new Size(320, 92);
+            optionGroup.Size = new Size(280, 92);
             left.Controls.Add(optionGroup);
 
             Label formatLabel = new Label();
@@ -127,7 +127,7 @@ namespace ImageToolbox
             _formatBox = new ComboBox();
             _formatBox.DropDownStyle = ComboBoxStyle.DropDownList;
             _formatBox.Location = new Point(92, 20);
-            _formatBox.Size = new Size(100, 25);
+            _formatBox.Size = new Size(100, 20);
             _formatBox.Items.Add("PNG");
             _formatBox.Items.Add("JPG");
             _formatBox.Items.Add("BMP");
@@ -136,14 +136,14 @@ namespace ImageToolbox
 
             _icoBox = new CheckBox();
             _icoBox.Text = "同时生成 .ico 图标";
-            _icoBox.Location = new Point(210, 22);
+            _icoBox.Location = new Point(12, 50);
             _icoBox.AutoSize = true;
             _icoBox.Checked = true;
             optionGroup.Controls.Add(_icoBox);
 
             _keepAspectBox = new CheckBox();
             _keepAspectBox.Text = "保持宽高比（不勾选则拉伸为正方形）";
-            _keepAspectBox.Location = new Point(12, 54);
+            _keepAspectBox.Location = new Point(12, 76);
             _keepAspectBox.AutoSize = true;
             _keepAspectBox.Checked = true;
             optionGroup.Controls.Add(_keepAspectBox);
@@ -156,19 +156,19 @@ namespace ImageToolbox
 
             _outDirBox = new TextBox();
             _outDirBox.Location = new Point(10, 356);
-            _outDirBox.Size = new Size(230, 25);
+            _outDirBox.Size = new Size(200, 20);
             left.Controls.Add(_outDirBox);
 
             Button outBrowse = new Button();
             outBrowse.Text = "浏览...";
-            outBrowse.Location = new Point(246, 355);
-            outBrowse.Size = new Size(84, 27);
+            outBrowse.Location = new Point(216, 355);
+            outBrowse.Size = new Size(74, 20);
             outBrowse.Click += delegate { BrowseOutDir(); };
             left.Controls.Add(outBrowse);
 
             Label note = new Label();
             note.Location = new Point(10, 392);
-            note.Size = new Size(320, 130);
+            note.Size = new Size(280, 130);
             note.ForeColor = Color.FromArgb(70, 70, 70);
             note.Text =
                 "说明：\r\n" +
@@ -196,7 +196,7 @@ namespace ImageToolbox
             Button start = new Button();
             start.Text = "开始导出";
             start.Location = new Point(10, 8);
-            start.Size = new Size(130, 34);
+            start.Size = new Size(130, 24);
             start.Click += delegate { StartExport(); };
             bottom.Controls.Add(start);
 
@@ -212,6 +212,12 @@ namespace ImageToolbox
             _status.Size = new Size(560, 22);
             _status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             bottom.Controls.Add(_status);
+
+            // 收紧：每个分组贴合内容，再把左侧各块依次压紧。
+            LayoutCompact.CompactAndFit(fileGroup, 6, 10);
+            LayoutCompact.CompactAndFit(sizeGroup, 6, 10);
+            LayoutCompact.CompactAndFit(optionGroup, 6, 10);
+            LayoutCompact.Compact(left, 8);
         }
 
         private void AddFiles()

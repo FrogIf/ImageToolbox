@@ -87,7 +87,7 @@ namespace ImageToolbox
             EditOpUi.Title(this, "色阶", 10);
             _hist = new HistogramView();
             _hist.Location = new Point(10, 40);
-            _hist.Size = new Size(300, 130);
+            _hist.Size = new Size(250, 130);
             Controls.Add(_hist);
 
             _black = EditOpUi.Slider(this, "黑场", 182, 0, 254, 0, out _blackV);

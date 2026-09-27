@@ -31,7 +31,7 @@ namespace ImageToolbox
 
             _offset = new Label();
             _offset.Location = new Point(10, 192);
-            _offset.Size = new Size(300, 20);
+            _offset.Size = new Size(250, 20);
             _offset.Text = "位移：0, 0";
             Controls.Add(_offset);
 

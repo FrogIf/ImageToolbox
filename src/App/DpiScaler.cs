@@ -36,14 +36,14 @@ namespace ImageToolbox
 
         public static void ApplyFactor(Control root, float factor, bool scaleRootSize)
         {
-            if (factor <= 0f || Math.Abs(factor - 1f) < 0.01f)
+            if (factor <= 0f)
             {
-                return;
+                factor = 1f;
             }
             root.SuspendLayout();
             try
             {
-                ScaleControl(root, factor, true, scaleRootSize);
+                Walk(root, factor, true, scaleRootSize);
             }
             finally
             {
@@ -51,7 +51,27 @@ namespace ImageToolbox
             }
         }
 
-        private static void ScaleControl(Control c, float f, bool isRoot, bool scaleRootSize)
+        private static void Walk(Control c, float f, bool isRoot, bool scaleRootSize)
+        {
+            // 操作面板：无论 DPI 是否缩放都先按设计坐标“压紧”一次。
+            EditOpPanel op = c as EditOpPanel;
+            if (op != null)
+            {
+                op.CompactLayout(6);
+            }
+
+            if (Math.Abs(f - 1f) >= 0.01f)
+            {
+                ScaleOne(c, f, isRoot, scaleRootSize);
+            }
+
+            for (int i = 0; i < c.Controls.Count; i++)
+            {
+                Walk(c.Controls[i], f, false, false);
+            }
+        }
+
+        private static void ScaleOne(Control c, float f, bool isRoot, bool scaleRootSize)
         {
             c.Padding = ScalePadding(c.Padding, f);
             c.Margin = ScalePadding(c.Margin, f);
@@ -112,11 +132,6 @@ namespace ImageToolbox
             {
                 splitter.MinExtra = Scale(splitter.MinExtra, f);
                 splitter.MinSize = Scale(splitter.MinSize, f);
-            }
-
-            for (int i = 0; i < c.Controls.Count; i++)
-            {
-                ScaleControl(c.Controls[i], f, false, false);
             }
         }
 

@@ -14,12 +14,19 @@ namespace ImageToolbox
 
         private ListView _listView;
         private ImageList _imageList;
+        private Panel _optionsPanel;
+        private GroupBox _outGroup;
         private TextBox _outBox;
+        private Button _outBrowse;
+        private Button _useSource;
+        private Button _addFiles;
+        private Button[] _topButtons;
         private CheckBox _overwriteBox;
         private CheckBox _recursiveBox;
         private ProgressBar _progress;
         private Label _status;
         private Button _startButton;
+        private bool _laying;
         private BackgroundWorker _worker;
         private BackgroundWorker _thumbWorker;
 
@@ -80,6 +87,11 @@ namespace ImageToolbox
             Font = new Font("Microsoft YaHei UI", 9F);
             AllowDrop = true;
 
+            // 本页大量使用 Anchor 绝对布局：必须在添加子控件前把客户区设成设计尺寸，
+            // 否则 Anchor 会按默认的 150x150 记录边距，窗口一大控件就被拉伸/推到画外
+            // （如文件列表撑成 1800px、右侧选项面板跑到不可见处）。
+            ClientSize = new Size(990, 700);
+
             BuildUi();
 
             DragEnter += OnDragEnter;
@@ -106,9 +118,9 @@ namespace ImageToolbox
 
         private void BuildUi()
         {
-            Button addFiles = MakeButton("添加文件", 10, 10, 90);
-            addFiles.Click += delegate { AddFilesDialog(); };
-            Controls.Add(addFiles);
+            _addFiles = MakeButton("添加文件", 10, 10, 90);
+            _addFiles.Click += delegate { AddFilesDialog(); };
+            Controls.Add(_addFiles);
 
             Button addFolder = MakeButton("添加文件夹", 105, 10, 100);
             addFolder.Click += delegate { AddFolderDialog(); };
@@ -134,6 +146,8 @@ namespace ImageToolbox
             refresh.Click += delegate { RefreshFromDirs(); };
             Controls.Add(refresh);
 
+            _topButtons = new Button[] { _addFiles, addFolder, remove, clear, checkAll, uncheckAll, refresh };
+
             _imageList = new ImageList();
             _imageList.ImageSize = new Size(ThumbSize, ThumbSize);
             _imageList.ColorDepth = ColorDepth.Depth32Bit;
@@ -142,7 +156,6 @@ namespace ImageToolbox
             _listView = new ListView();
             _listView.Location = new Point(10, 48);
             _listView.Size = new Size(630, 464);
-            _listView.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             _listView.View = View.LargeIcon;
             _listView.LargeImageList = _imageList;
             _listView.MultiSelect = true;
@@ -156,68 +169,59 @@ namespace ImageToolbox
 
             BuildOptionsPanel();
 
-            GroupBox outGroup = new GroupBox();
-            outGroup.Text = "输出目录（留空则保存到源文件所在目录）";
-            outGroup.Location = new Point(10, 520);
-            outGroup.Size = new Size(970, 56);
-            outGroup.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            Controls.Add(outGroup);
+            _outGroup = new GroupBox();
+            _outGroup.Text = "输出目录（留空则保存到源文件所在目录）";
+            _outGroup.Location = new Point(10, 520);
+            _outGroup.Size = new Size(970, 44);
+            Controls.Add(_outGroup);
 
             _outBox = new TextBox();
-            _outBox.Location = new Point(12, 22);
-            _outBox.Size = new Size(756, 25);
-            _outBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            outGroup.Controls.Add(_outBox);
+            _outBox.Location = new Point(12, 16);
+            _outBox.Size = new Size(756, 20);
+            _outGroup.Controls.Add(_outBox);
 
-            Button browse = new Button();
-            browse.Text = "浏览...";
-            browse.Location = new Point(774, 21);
-            browse.Size = new Size(80, 26);
-            browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            browse.Click += delegate { ChooseOutDir(); };
-            outGroup.Controls.Add(browse);
+            _outBrowse = new Button();
+            _outBrowse.Text = "浏览...";
+            _outBrowse.Location = new Point(774, 16);
+            _outBrowse.Size = new Size(80, 20);
+            _outBrowse.Click += delegate { ChooseOutDir(); };
+            _outGroup.Controls.Add(_outBrowse);
 
-            Button useSource = new Button();
-            useSource.Text = "使用源目录";
-            useSource.Location = new Point(860, 21);
-            useSource.Size = new Size(96, 26);
-            useSource.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            useSource.Click += delegate { _outBox.Text = ""; };
-            outGroup.Controls.Add(useSource);
+            _useSource = new Button();
+            _useSource.Text = "使用源目录";
+            _useSource.Location = new Point(860, 16);
+            _useSource.Size = new Size(96, 20);
+            _useSource.Click += delegate { _outBox.Text = ""; };
+            _outGroup.Controls.Add(_useSource);
 
             _overwriteBox = new CheckBox();
             _overwriteBox.Text = "覆盖同名文件";
             _overwriteBox.Location = new Point(10, 584);
             _overwriteBox.AutoSize = true;
-            _overwriteBox.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             Controls.Add(_overwriteBox);
 
             _recursiveBox = new CheckBox();
             _recursiveBox.Text = "添加文件夹时递归子目录";
             _recursiveBox.Location = new Point(150, 584);
             _recursiveBox.AutoSize = true;
-            _recursiveBox.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             _recursiveBox.Checked = true;
             Controls.Add(_recursiveBox);
 
             _progress = new ProgressBar();
             _progress.Location = new Point(10, 612);
             _progress.Size = new Size(970, 20);
-            _progress.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(_progress);
 
             _status = new Label();
             _status.Text = "就绪";
             _status.Location = new Point(10, 640);
             _status.Size = new Size(820, 22);
-            _status.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(_status);
 
             _startButton = new Button();
             _startButton.Text = "开始处理";
-            _startButton.Location = new Point(850, 636);
-            _startButton.Size = new Size(130, 32);
-            _startButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            _startButton.Location = new Point(850, 642);
+            _startButton.Size = new Size(130, 24);
             _startButton.Click += delegate { StartProcess(); };
             Controls.Add(_startButton);
 
@@ -236,27 +240,122 @@ namespace ImageToolbox
             _thumbWorker.RunWorkerCompleted += ThumbCompleted;
         }
 
+        // 本页以前用 Anchor 绝对布局，但 DpiScaler 会按 DPI 放大每个控件的坐标/尺寸，
+        // 与 Anchor 的边距叠加后在高 DPI 下会把右侧面板/底部控件推到画外。改成每次布局
+        // 都按当前客户区重新摆放（比例取顶部按钮的缩放后高度），与 DPI 无关且稳定。
+        protected override void OnLayout(LayoutEventArgs levent)
+        {
+            base.OnLayout(levent);
+            RelayoutBatch();
+        }
+
+        private void RelayoutBatch()
+        {
+            if (_laying || _addFiles == null || _topButtons == null || _listView == null || _optionsPanel == null ||
+                _outGroup == null || _outBox == null || _outBrowse == null || _useSource == null ||
+                _progress == null || _status == null || _startButton == null) { return; }
+            _laying = true;
+            try
+            {
+                float s = _addFiles.Height / 22f;
+                if (s <= 0f) { s = 1f; }
+
+                int w = ClientSize.Width;
+                int h = ClientSize.Height;
+                int pad = S(10, s);
+                int gap = S(8, s);
+
+                int startH = _startButton.Height > 0 ? _startButton.Height : S(24, s);
+                int statusH = S(22, s);
+                int progressH = S(20, s);
+                int cbH = S(21, s);
+                int outH = S(44, s);
+
+                int startBottom = h - S(34, s);
+                int startTop = startBottom - startH;
+                int progressTop = startTop - gap - progressH;
+                int cbTop = progressTop - S(10, s) - cbH;
+                int outTop = cbTop - S(18, s) - outH;
+
+                // 顶部按钮：从左到右排，放不下就换行（高 DPI/窄窗口下也不会溢出）。
+                int bx = pad;
+                int by = S(10, s);
+                int rowH = 0;
+                for (int i = 0; i < _topButtons.Length; i++)
+                {
+                    Button b = _topButtons[i];
+                    if (bx > pad && bx + b.Width > w - pad)
+                    {
+                        bx = pad;
+                        by += rowH + S(6, s);
+                        rowH = 0;
+                    }
+                    if (b.Height > rowH) { rowH = b.Height; }
+                    b.Location = new Point(bx, by);
+                    bx += b.Width + S(5, s);
+                }
+
+                int contentTop = by + rowH + S(8, s);
+                int contentBottom = outTop - gap;
+                int contentH = contentBottom - contentTop;
+                if (contentH < S(60, s)) { contentH = S(60, s); }
+
+                int panelW = S(280, s);
+                int panelX = w - pad - panelW;
+                _optionsPanel.SetBounds(panelX, contentTop, panelW, contentH);
+                int listW = panelX - gap - pad;
+                if (listW < S(120, s)) { listW = S(120, s); }
+                _listView.SetBounds(pad, contentTop, listW, contentH);
+
+                _outGroup.SetBounds(pad, outTop, w - 2 * pad, outH);
+                int ogW = _outGroup.ClientSize.Width > 0 ? _outGroup.ClientSize.Width : w - 2 * pad;
+                int innerY = S(16, s);
+                int h20 = S(20, s);
+                int useW = S(96, s);
+                _useSource.SetBounds(ogW - S(12, s) - useW, innerY, useW, h20);
+                _outBrowse.SetBounds(_useSource.Left - gap - S(80, s), innerY, S(80, s), h20);
+                int boxW = _outBrowse.Left - gap - S(12, s);
+                if (boxW < S(60, s)) { boxW = S(60, s); }
+                _outBox.SetBounds(S(12, s), innerY, boxW, h20);
+
+                _overwriteBox.Location = new Point(pad, cbTop);
+                _recursiveBox.Location = new Point(pad + S(140, s), cbTop);
+                _progress.SetBounds(pad, progressTop, w - 2 * pad, progressH);
+                _startButton.SetBounds(w - pad - S(130, s), startTop, S(130, s), startH);
+                _status.SetBounds(pad, startBottom - statusH, _startButton.Left - gap - pad, statusH);
+            }
+            finally
+            {
+                _laying = false;
+            }
+        }
+
+        private static int S(int value, float scale)
+        {
+            return (int)Math.Round(value * scale);
+        }
+
         private void BuildOptionsPanel()
         {
             Panel panel = new Panel();
-            panel.Location = new Point(650, 48);
-            panel.Size = new Size(330, 464);
-            panel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
+            panel.Location = new Point(700, 48);
+            panel.Size = new Size(280, 464);
             panel.AutoScroll = true;
             panel.BorderStyle = BorderStyle.FixedSingle;
             Controls.Add(panel);
+            _optionsPanel = panel;
 
             GroupBox formatGroup = new GroupBox();
             formatGroup.Text = "输出格式";
             formatGroup.Location = new Point(4, 4);
-            formatGroup.Size = new Size(306, 120);
+            formatGroup.Size = new Size(256, 120);
             panel.Controls.Add(formatGroup);
 
             AddLabel(formatGroup, "格式", 10, 26);
             _formatBox = new ComboBox();
             _formatBox.DropDownStyle = ComboBoxStyle.DropDownList;
             _formatBox.Location = new Point(80, 22);
-            _formatBox.Size = new Size(214, 25);
+            _formatBox.Size = new Size(160, 22);
             _formatBox.Items.Add("保持原格式（WebP 源转 PNG）");
             _formatBox.Items.Add("PNG（保留透明）");
             _formatBox.Items.Add("JPG");
@@ -278,8 +377,8 @@ namespace ImageToolbox
             };
             _qualityValue = new Label();
             _qualityValue.Text = "90%";
-            _qualityValue.Location = new Point(236, 60);
-            _qualityValue.Size = new Size(58, 20);
+            _qualityValue.Location = new Point(196, 60);
+            _qualityValue.Size = new Size(48, 20);
             _qualityValue.TextAlign = ContentAlignment.MiddleRight;
             formatGroup.Controls.Add(_qualityValue);
 
@@ -287,7 +386,7 @@ namespace ImageToolbox
             _matteButton = new Button();
             _matteButton.Text = "白色";
             _matteButton.Location = new Point(80, 86);
-            _matteButton.Size = new Size(80, 26);
+            _matteButton.Size = new Size(80, 20);
             _matteButton.BackColor = _matteColor;
             _matteButton.Click += delegate { ChooseMatteColor(); };
             formatGroup.Controls.Add(_matteButton);
@@ -295,14 +394,14 @@ namespace ImageToolbox
             GroupBox resizeGroup = new GroupBox();
             resizeGroup.Text = "尺寸";
             resizeGroup.Location = new Point(4, 128);
-            resizeGroup.Size = new Size(306, 176);
+            resizeGroup.Size = new Size(256, 176);
             panel.Controls.Add(resizeGroup);
 
             AddLabel(resizeGroup, "缩放模式", 10, 26);
             _resizeModeBox = new ComboBox();
             _resizeModeBox.DropDownStyle = ComboBoxStyle.DropDownList;
             _resizeModeBox.Location = new Point(80, 22);
-            _resizeModeBox.Size = new Size(214, 25);
+            _resizeModeBox.Size = new Size(160, 22);
             _resizeModeBox.Items.Add("不缩放");
             _resizeModeBox.Items.Add("按长边");
             _resizeModeBox.Items.Add("按百分比");
@@ -318,13 +417,13 @@ namespace ImageToolbox
             _percentNum = MakeNumeric(resizeGroup, 80, 86, 100, 1, 4000, 100);
 
             AddLabel(resizeGroup, "宽 × 高", 10, 122);
-            _widthNum = MakeNumeric(resizeGroup, 80, 118, 80, 1, 100000, 800);
+            _widthNum = MakeNumeric(resizeGroup, 80, 118, 70, 1, 100000, 800);
             Label times = new Label();
             times.Text = "×";
-            times.Location = new Point(164, 122);
+            times.Location = new Point(154, 122);
             times.AutoSize = true;
             resizeGroup.Controls.Add(times);
-            _heightNum = MakeNumeric(resizeGroup, 182, 118, 80, 1, 100000, 600);
+            _heightNum = MakeNumeric(resizeGroup, 172, 118, 70, 1, 100000, 600);
 
             _keepAspectBox = new CheckBox();
             _keepAspectBox.Text = "保持宽高比";
@@ -335,7 +434,7 @@ namespace ImageToolbox
 
             _allowUpscaleBox = new CheckBox();
             _allowUpscaleBox.Text = "允许放大";
-            _allowUpscaleBox.Location = new Point(150, 148);
+            _allowUpscaleBox.Location = new Point(130, 148);
             _allowUpscaleBox.AutoSize = true;
             _allowUpscaleBox.Checked = true;
             resizeGroup.Controls.Add(_allowUpscaleBox);
@@ -343,14 +442,14 @@ namespace ImageToolbox
             GroupBox transformGroup = new GroupBox();
             transformGroup.Text = "旋转 / 翻转";
             transformGroup.Location = new Point(4, 310);
-            transformGroup.Size = new Size(306, 116);
+            transformGroup.Size = new Size(256, 116);
             panel.Controls.Add(transformGroup);
 
             AddLabel(transformGroup, "旋转", 10, 26);
             _rotateBox = new ComboBox();
             _rotateBox.DropDownStyle = ComboBoxStyle.DropDownList;
             _rotateBox.Location = new Point(80, 22);
-            _rotateBox.Size = new Size(214, 25);
+            _rotateBox.Size = new Size(160, 22);
             _rotateBox.Items.Add("不旋转");
             _rotateBox.Items.Add("顺时针 90°");
             _rotateBox.Items.Add("180°");
@@ -366,7 +465,7 @@ namespace ImageToolbox
 
             _flipVBox = new CheckBox();
             _flipVBox.Text = "垂直翻转";
-            _flipVBox.Location = new Point(140, 56);
+            _flipVBox.Location = new Point(120, 56);
             _flipVBox.AutoSize = true;
             transformGroup.Controls.Add(_flipVBox);
 
@@ -380,7 +479,7 @@ namespace ImageToolbox
             GroupBox nameGroup = new GroupBox();
             nameGroup.Text = "重命名";
             nameGroup.Location = new Point(4, 432);
-            nameGroup.Size = new Size(306, 168);
+            nameGroup.Size = new Size(256, 168);
             panel.Controls.Add(nameGroup);
 
             _keepNameRadio = new RadioButton();
@@ -393,14 +492,14 @@ namespace ImageToolbox
 
             _customNameRadio = new RadioButton();
             _customNameRadio.Text = "自定义";
-            _customNameRadio.Location = new Point(120, 22);
+            _customNameRadio.Location = new Point(100, 22);
             _customNameRadio.AutoSize = true;
             _customNameRadio.CheckedChanged += delegate { UpdateOptionStates(); };
             nameGroup.Controls.Add(_customNameRadio);
 
             _patternBox = new TextBox();
             _patternBox.Location = new Point(10, 48);
-            _patternBox.Size = new Size(288, 25);
+            _patternBox.Size = new Size(236, 22);
             _patternBox.Text = "{name}_{nnn}";
             nameGroup.Controls.Add(_patternBox);
 
@@ -412,24 +511,24 @@ namespace ImageToolbox
 
             AddLabel(nameGroup, "起始序号", 10, 106);
             _startIndexNum = MakeNumeric(nameGroup, 80, 102, 70, 0, 1000000, 1);
-            AddLabel(nameGroup, "位数", 162, 106);
-            _indexDigitsNum = MakeNumeric(nameGroup, 202, 102, 60, 1, 8, 3);
+            AddLabel(nameGroup, "位数", 158, 106);
+            _indexDigitsNum = MakeNumeric(nameGroup, 196, 102, 50, 1, 8, 3);
 
             AddLabel(nameGroup, "查找", 10, 134);
             _findBox = new TextBox();
-            _findBox.Location = new Point(54, 130);
-            _findBox.Size = new Size(98, 25);
+            _findBox.Location = new Point(50, 130);
+            _findBox.Size = new Size(80, 22);
             nameGroup.Controls.Add(_findBox);
-            AddLabel(nameGroup, "替换", 162, 134);
+            AddLabel(nameGroup, "替换", 136, 134);
             _replaceBox = new TextBox();
-            _replaceBox.Location = new Point(202, 130);
-            _replaceBox.Size = new Size(96, 25);
+            _replaceBox.Location = new Point(176, 130);
+            _replaceBox.Size = new Size(70, 22);
             nameGroup.Controls.Add(_replaceBox);
 
             GroupBox wmGroup = new GroupBox();
             wmGroup.Text = "水印";
             wmGroup.Location = new Point(4, 606);
-            wmGroup.Size = new Size(306, 306);
+            wmGroup.Size = new Size(256, 306);
             panel.Controls.Add(wmGroup);
 
             _wmEnableBox = new CheckBox();
@@ -456,22 +555,22 @@ namespace ImageToolbox
 
             _wmTextBox = new TextBox();
             _wmTextBox.Location = new Point(10, 74);
-            _wmTextBox.Size = new Size(196, 25);
+            _wmTextBox.Size = new Size(150, 22);
             _wmTextBox.Text = "水印";
             wmGroup.Controls.Add(_wmTextBox);
 
             _wmColorButton = new Button();
             _wmColorButton.Text = "颜色";
-            _wmColorButton.Location = new Point(216, 73);
-            _wmColorButton.Size = new Size(82, 27);
+            _wmColorButton.Location = new Point(168, 73);
+            _wmColorButton.Size = new Size(78, 20);
             _wmColorButton.BackColor = _wmColor;
             _wmColorButton.Click += delegate { ChooseWatermarkColor(); };
             wmGroup.Controls.Add(_wmColorButton);
 
             AddLabel(wmGroup, "字号", 10, 108);
             _wmFontSizeNum = MakeNumeric(wmGroup, 54, 104, 60, 6, 500, 36);
-            AddLabel(wmGroup, "角度", 160, 108);
-            _wmAngleNum = MakeNumeric(wmGroup, 200, 104, 62, -180, 180, 0);
+            AddLabel(wmGroup, "角度", 150, 108);
+            _wmAngleNum = MakeNumeric(wmGroup, 190, 104, 56, -180, 180, 0);
 
             AddLabel(wmGroup, "不透明度", 10, 140);
             _wmOpacityBar = MakeTrackBar(wmGroup, 80, 136, 150);
@@ -484,8 +583,8 @@ namespace ImageToolbox
             };
             _wmOpacityValue = new Label();
             _wmOpacityValue.Text = "50%";
-            _wmOpacityValue.Location = new Point(236, 142);
-            _wmOpacityValue.Size = new Size(58, 20);
+            _wmOpacityValue.Location = new Point(196, 142);
+            _wmOpacityValue.Size = new Size(48, 20);
             _wmOpacityValue.TextAlign = ContentAlignment.MiddleRight;
             wmGroup.Controls.Add(_wmOpacityValue);
 
@@ -493,7 +592,7 @@ namespace ImageToolbox
             _wmPosBox = new ComboBox();
             _wmPosBox.DropDownStyle = ComboBoxStyle.DropDownList;
             _wmPosBox.Location = new Point(80, 170);
-            _wmPosBox.Size = new Size(214, 25);
+            _wmPosBox.Size = new Size(160, 22);
             _wmPosBox.Items.Add("左上");
             _wmPosBox.Items.Add("上中");
             _wmPosBox.Items.Add("右上");
@@ -511,7 +610,7 @@ namespace ImageToolbox
             _wmMarginNum = MakeNumeric(wmGroup, 54, 202, 60, 0, 2000, 16);
             _wmTileBox = new CheckBox();
             _wmTileBox.Text = "平铺";
-            _wmTileBox.Location = new Point(140, 204);
+            _wmTileBox.Location = new Point(130, 204);
             _wmTileBox.AutoSize = true;
             _wmTileBox.CheckedChanged += delegate { UpdateOptionStates(); };
             wmGroup.Controls.Add(_wmTileBox);
@@ -519,17 +618,25 @@ namespace ImageToolbox
             AddLabel(wmGroup, "水印图", 10, 238);
             _wmImageBox = new TextBox();
             _wmImageBox.Location = new Point(80, 234);
-            _wmImageBox.Size = new Size(140, 25);
+            _wmImageBox.Size = new Size(110, 22);
             wmGroup.Controls.Add(_wmImageBox);
             _wmImageBrowse = new Button();
             _wmImageBrowse.Text = "浏览...";
-            _wmImageBrowse.Location = new Point(224, 233);
-            _wmImageBrowse.Size = new Size(74, 27);
+            _wmImageBrowse.Location = new Point(196, 233);
+            _wmImageBrowse.Size = new Size(54, 20);
             _wmImageBrowse.Click += delegate { ChooseWatermarkImage(); };
             wmGroup.Controls.Add(_wmImageBrowse);
 
             AddLabel(wmGroup, "缩放%", 10, 270);
             _wmScaleNum = MakeNumeric(wmGroup, 80, 266, 60, 1, 100, 20);
+
+            // 收紧：先让每个分组贴合内容，再把分组依次压紧排列。
+            LayoutCompact.CompactAndFit(formatGroup, 6, 12);
+            LayoutCompact.CompactAndFit(resizeGroup, 6, 12);
+            LayoutCompact.CompactAndFit(transformGroup, 6, 12);
+            LayoutCompact.CompactAndFit(nameGroup, 6, 12);
+            LayoutCompact.CompactAndFit(wmGroup, 6, 12);
+            LayoutCompact.Compact(panel, 6);
 
             UpdateOptionStates();
         }
@@ -539,7 +646,7 @@ namespace ImageToolbox
             Button b = new Button();
             b.Text = text;
             b.Location = new Point(x, y);
-            b.Size = new Size(width, 28);
+            b.Size = new Size(width, 22);
             return b;
         }
 
@@ -557,7 +664,7 @@ namespace ImageToolbox
         {
             NumericUpDown num = new NumericUpDown();
             num.Location = new Point(x, y);
-            num.Size = new Size(width, 25);
+            num.Size = new Size(width, 20);
             num.Minimum = min;
             num.Maximum = max;
             num.Value = value;
@@ -573,7 +680,7 @@ namespace ImageToolbox
             bar.Maximum = 100;
             bar.TickStyle = TickStyle.None;
             bar.Location = new Point(x, y);
-            bar.Size = new Size(width, 30);
+            bar.Size = new Size(width, 20);
             parent.Controls.Add(bar);
             return bar;
         }

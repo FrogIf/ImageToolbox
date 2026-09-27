@@ -42,7 +42,7 @@ namespace ImageToolbox
 
             _images = new ListBox();
             _images.Location = new Point(10, 276);
-            _images.Size = new Size(290, 90);
+            _images.Size = new Size(250, 90);
             _images.IntegralHeight = false;
             Controls.Add(_images);
 

@@ -105,7 +105,7 @@ namespace ImageToolbox
             root.Dock = DockStyle.Fill;
             root.ColumnCount = 1;
             root.RowCount = 2;
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             Controls.Add(root);
 
@@ -137,8 +137,8 @@ namespace ImageToolbox
             _resetButton.Click += delegate { _session.ResetToOriginal(); ReloadAll(); _layerPanel.Sync(); };
 
             _status = new Label();
-            _status.Location = new Point(582, 11);
-            _status.Size = new Size(500, 22);
+            _status.Location = new Point(582, 6);
+            _status.Size = new Size(500, 18);
             _status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _status.Text = "打开一张图片，然后在左侧选择操作；调好后点「应用到图片」";
             toolbar.Controls.Add(_status);
@@ -147,9 +147,9 @@ namespace ImageToolbox
             body.Dock = DockStyle.Fill;
             body.ColumnCount = 3;
             body.RowCount = 1;
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 156f));
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 142f));
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340f));
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300f));
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             body.Margin = new Padding(3, 3, 3, 3);
             root.Controls.Add(body, 0, 1);
@@ -249,8 +249,8 @@ namespace ImageToolbox
         {
             Button button = new Button();
             button.Text = text;
-            button.Location = new Point(x, 6);
-            button.Size = new Size(width, 28);
+            button.Location = new Point(x, 3);
+            button.Size = new Size(width, 22);
             parent.Controls.Add(button);
             return button;
         }
@@ -835,7 +835,7 @@ namespace ImageToolbox
             AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Microsoft YaHei UI", 9F);
             Text = "新建图片";
-            ClientSize = new Size(300, 158);
+            ClientSize = new Size(260, 140);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -844,13 +844,13 @@ namespace ImageToolbox
 
             Label wl = new Label();
             wl.Text = "宽度 (px)";
-            wl.Location = new Point(16, 22);
+            wl.Location = new Point(16, 20);
             wl.AutoSize = true;
             Controls.Add(wl);
 
             _width = new NumericUpDown();
-            _width.Location = new Point(110, 18);
-            _width.Size = new Size(160, 24);
+            _width.Location = new Point(86, 16);
+            _width.Size = new Size(130, 22);
             _width.Minimum = 1;
             _width.Maximum = 20000;
             _width.Value = 1920;
@@ -858,13 +858,13 @@ namespace ImageToolbox
 
             Label hl = new Label();
             hl.Text = "高度 (px)";
-            hl.Location = new Point(16, 56);
+            hl.Location = new Point(16, 50);
             hl.AutoSize = true;
             Controls.Add(hl);
 
             _height = new NumericUpDown();
-            _height.Location = new Point(110, 52);
-            _height.Size = new Size(160, 24);
+            _height.Location = new Point(86, 46);
+            _height.Size = new Size(130, 22);
             _height.Minimum = 1;
             _height.Maximum = 20000;
             _height.Value = 1080;
@@ -872,14 +872,14 @@ namespace ImageToolbox
 
             Label bl = new Label();
             bl.Text = "背景";
-            bl.Location = new Point(16, 90);
+            bl.Location = new Point(16, 80);
             bl.AutoSize = true;
             Controls.Add(bl);
 
             _bg = new ComboBox();
             _bg.DropDownStyle = ComboBoxStyle.DropDownList;
-            _bg.Location = new Point(110, 86);
-            _bg.Size = new Size(160, 24);
+            _bg.Location = new Point(86, 76);
+            _bg.Size = new Size(130, 22);
             _bg.Items.Add("白色");
             _bg.Items.Add("透明");
             _bg.SelectedIndex = 0;
@@ -887,15 +887,15 @@ namespace ImageToolbox
 
             Button ok = new Button();
             ok.Text = "确定";
-            ok.Location = new Point(110, 120);
-            ok.Size = new Size(76, 28);
+            ok.Location = new Point(86, 104);
+            ok.Size = new Size(72, 22);
             ok.DialogResult = DialogResult.OK;
             Controls.Add(ok);
 
             Button cancel = new Button();
             cancel.Text = "取消";
-            cancel.Location = new Point(194, 120);
-            cancel.Size = new Size(76, 28);
+            cancel.Location = new Point(164, 104);
+            cancel.Size = new Size(72, 22);
             cancel.DialogResult = DialogResult.Cancel;
             Controls.Add(cancel);
 

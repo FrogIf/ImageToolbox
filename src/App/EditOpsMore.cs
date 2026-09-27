@@ -312,7 +312,7 @@ namespace ImageToolbox
 
             _refCanvas = new ImageCanvas();
             _refCanvas.Location = new Point(130, 40);
-            _refCanvas.Size = new Size(170, 90);
+            _refCanvas.Size = new Size(140, 80);
             _refCanvas.ReadOnly = true;
             Controls.Add(_refCanvas);
 
@@ -431,7 +431,7 @@ namespace ImageToolbox
             EditOpUi.Button(this, "选择覆盖图", 10, 40, 110, delegate { BrowseOverlay(); });
             _overlayCanvas = new ImageCanvas();
             _overlayCanvas.Location = new Point(130, 40);
-            _overlayCanvas.Size = new Size(170, 90);
+            _overlayCanvas.Size = new Size(140, 80);
             _overlayCanvas.ReadOnly = true;
             _overlayCanvas.ZoomEnabled = false;
             Controls.Add(_overlayCanvas);
@@ -439,12 +439,12 @@ namespace ImageToolbox
             EditOpUi.Caption(this, "覆盖位置", 144);
             _mode = EditOpUi.Combo(this, 140, new string[] { "相对", "绝对" }, 0);
             _mode.Location = new Point(76, 140);
-            _mode.Width = 224;
+            _mode.Width = 190;
             _mode.SelectedIndexChanged += delegate { RaisePreview(); };
 
             _regions = new ListBox();
             _regions.Location = new Point(10, 174);
-            _regions.Size = new Size(290, 84);
+            _regions.Size = new Size(250, 84);
             _regions.IntegralHeight = false;
             Controls.Add(_regions);
 
@@ -456,7 +456,7 @@ namespace ImageToolbox
             _opacity = EditOpUi.Slider(this, "不透明", 344, 0, 100, 100, out _opacityV);
             _feather.ValueChanged += delegate { _featherV.Text = _feather.Value.ToString(); RaisePreview(); };
             _opacity.ValueChanged += delegate { _opacityV.Text = _opacity.Value + "%"; RaisePreview(); };
-            EditOpUi.Note(this, "在左侧图片框选后「添加选区」，可加多个。相对：按比例取覆盖图上对应的一块，再缩放到底图选区；绝对：用选区的像素位置和大小，1:1 在覆盖图上截取并贴到底图同一位置（覆盖图比底图大时用此项）。", 382, 84);
+            EditOpUi.Note(this, "在左侧图片框选后「添加选区」，可加多个。相对：按比例取覆盖图上对应的一块，再缩放到底图选区；绝对：用选区的像素位置和大小，1:1 在覆盖图上截取并贴到底图同一位置（覆盖图比底图大时用此项）。", 382, 96);
         }
 
         protected override void OnActivate()
@@ -636,14 +636,14 @@ namespace ImageToolbox
             Controls.Add(_swatch);
             _info = new Label();
             _info.Location = new Point(80, 46);
-            _info.Size = new Size(220, 60);
+            _info.Size = new Size(200, 60);
             _info.Text = "点击左侧图片取色";
             Controls.Add(_info);
 
             EditOpUi.Button(this, "提取主色", 10, 100, 100, delegate { Extract(); });
             _palette = new FlowLayoutPanel();
             _palette.Location = new Point(10, 140);
-            _palette.Size = new Size(290, 300);
+            _palette.Size = new Size(250, 300);
             _palette.AutoScroll = true;
             _palette.BorderStyle = BorderStyle.FixedSingle;
             Controls.Add(_palette);
@@ -766,11 +766,11 @@ namespace ImageToolbox
             EditOpUi.Title(this, "图片信息", 10);
             _stats = new Label();
             _stats.Location = new Point(10, 44);
-            _stats.Size = new Size(300, 150);
+            _stats.Size = new Size(250, 150);
             Controls.Add(_stats);
             _hist = new HistogramView();
             _hist.Location = new Point(10, 200);
-            _hist.Size = new Size(300, 150);
+            _hist.Size = new Size(250, 150);
             Controls.Add(_hist);
             EditOpUi.Note(this, "查看当前图片的尺寸与色彩统计（不改变图片）。", 358, 40);
         }

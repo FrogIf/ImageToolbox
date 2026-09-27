@@ -42,11 +42,11 @@ namespace ImageToolbox
 
             Panel top = new Panel();
             top.Dock = DockStyle.Top;
-            top.Height = 94;
+            top.Height = 80;
 
             Panel bottom = new Panel();
             bottom.Dock = DockStyle.Bottom;
-            bottom.Height = 104;
+            bottom.Height = 86;
 
             _list = new ListBox();
             _list.Dock = DockStyle.Fill;
@@ -55,12 +55,12 @@ namespace ImageToolbox
 
             Panel titleBar = new Panel();
             titleBar.Dock = DockStyle.Top;
-            titleBar.Height = 28;
+            titleBar.Height = 24;
 
             Label title = new Label();
             title.Text = "图层";
             title.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
-            title.Location = new Point(2, 4);
+            title.Location = new Point(2, 2);
             title.AutoSize = true;
             titleBar.Controls.Add(title);
 
@@ -83,21 +83,21 @@ namespace ImageToolbox
 
             _visible = new CheckBox();
             _visible.Text = "显示";
-            _visible.Location = new Point(2, 4);
+            _visible.Location = new Point(2, 3);
             _visible.AutoSize = true;
             _visible.CheckedChanged += delegate { ToggleVisible(); };
             bottom.Controls.Add(_visible);
 
             Label modeCaption = new Label();
             modeCaption.Text = "混合模式";
-            modeCaption.Location = new Point(78, 7);
+            modeCaption.Location = new Point(78, 6);
             modeCaption.AutoSize = true;
             bottom.Controls.Add(modeCaption);
 
             _mode = new ComboBox();
             _mode.DropDownStyle = ComboBoxStyle.DropDownList;
-            _mode.Location = new Point(142, 4);
-            _mode.Size = new Size(180, 25);
+            _mode.Location = new Point(136, 3);
+            _mode.Size = new Size(144, 22);
             for (int i = 0; i < ImageBlend.ModeNames.Length; i++)
             {
                 _mode.Items.Add(ImageBlend.ModeNames[i]);
@@ -107,7 +107,7 @@ namespace ImageToolbox
 
             Label opCaption = new Label();
             opCaption.Text = "不透明";
-            opCaption.Location = new Point(2, 40);
+            opCaption.Location = new Point(2, 31);
             opCaption.AutoSize = true;
             bottom.Controls.Add(opCaption);
 
@@ -117,21 +117,21 @@ namespace ImageToolbox
             _opacity.Minimum = 0;
             _opacity.Maximum = 100;
             _opacity.Value = 100;
-            _opacity.Location = new Point(74, 34);
-            _opacity.Size = new Size(180, 30);
+            _opacity.Location = new Point(74, 26);
+            _opacity.Size = new Size(150, 22);
             _opacity.ValueChanged += delegate { ChangeOpacity(); };
             bottom.Controls.Add(_opacity);
 
             _opacityV = new Label();
-            _opacityV.Location = new Point(258, 40);
-            _opacityV.Size = new Size(62, 20);
+            _opacityV.Location = new Point(228, 30);
+            _opacityV.Size = new Size(52, 18);
             _opacityV.TextAlign = ContentAlignment.MiddleRight;
             bottom.Controls.Add(_opacityV);
 
             Label hint = new Label();
             hint.Text = "操作作用于选中图层；画布显示所有图层的合成结果。\r\n拖动上方分隔条可调整本面板高度。";
-            hint.Location = new Point(2, 72);
-            hint.Size = new Size(318, 30);
+            hint.Location = new Point(2, 56);
+            hint.Size = new Size(280, 28);
             hint.ForeColor = Color.FromArgb(80, 80, 80);
             bottom.Controls.Add(hint);
 
@@ -145,7 +145,7 @@ namespace ImageToolbox
             Button button = new Button();
             button.Text = text;
             button.AutoSize = true;
-            button.MinimumSize = new Size(48, 28);
+            button.MinimumSize = new Size(48, 22);
             button.Margin = new Padding(2);
             button.Click += onClick;
             parent.Controls.Add(button);

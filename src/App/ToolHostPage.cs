@@ -48,7 +48,7 @@ namespace ImageToolbox
             root.Dock = DockStyle.Fill;
             root.ColumnCount = 2;
             root.RowCount = 1;
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180f));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160f));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             Controls.Add(root);
@@ -57,7 +57,7 @@ namespace ImageToolbox
             leftGrid.Dock = DockStyle.Fill;
             leftGrid.ColumnCount = 1;
             leftGrid.RowCount = 2;
-            leftGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
+            leftGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
             leftGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             leftGrid.Margin = new Padding(3, 3, 3, 3);
             root.Controls.Add(leftGrid, 0, 0);

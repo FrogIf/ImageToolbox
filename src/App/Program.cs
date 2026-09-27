@@ -17,7 +17,9 @@ namespace ImageToolbox
             ClientSize = new Size(1180, 760);
             MinimumSize = new Size(1000, 700);
             StartPosition = FormStartPosition.CenterScreen;
-            WindowState = FormWindowState.Maximized;
+            // 注意：不要在这里设 WindowState=Maximized。在句柄创建前最大化，部分 Windows
+            // 上会让任务栏按钮拿不到窗口图标（标题栏/资源管理器都正常，只有任务栏空白）。
+            // 改为窗口显示后再最大化（见 OnShown）。
             Font = new Font("Microsoft YaHei UI", 9F);
             try
             {
@@ -44,6 +46,12 @@ namespace ImageToolbox
         {
             base.OnLoad(e);
             DpiScaler.Apply(this, false);
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            WindowState = FormWindowState.Maximized;
         }
 
         public void AddTool(ToolPage tool)

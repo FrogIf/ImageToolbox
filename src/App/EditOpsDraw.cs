@@ -152,7 +152,7 @@ namespace ImageToolbox
             _shape.SelectedIndexChanged += delegate { RaisePreview(); };
             _fill = new CheckBox();
             _fill.Text = "填充";
-            _fill.Location = new Point(206, 123);
+            _fill.Location = new Point(204, 123);
             _fill.AutoSize = true;
             _fill.CheckedChanged += delegate { RaisePreview(); };
             Controls.Add(_fill);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -129,6 +130,13 @@ namespace ImageToolbox
         // 并通过 OnCanvasDrag 派发起点/移动/结束，action 分别为 0/1/2）。
         public virtual bool WantsCanvasDrag { get { return false; } }
         public virtual void OnCanvasDrag(Point imagePoint, int action) { }
+
+        // 垂直方向“压紧”布局（见 LayoutCompact）。在 DpiScaler 按设计坐标缩放前调用，
+        // 所以 gap 用设计像素。
+        internal void CompactLayout(int gap)
+        {
+            LayoutCompact.Compact(this, gap);
+        }
     }
 
     public static class EditOpUi
@@ -149,7 +157,7 @@ namespace ImageToolbox
             Label label = new Label();
             label.Text = text;
             label.Location = new Point(10, y);
-            label.Size = new Size(300, height);
+            label.Size = new Size(250, height);
             label.ForeColor = Color.FromArgb(80, 80, 80);
             parent.Controls.Add(label);
             return label;
@@ -169,7 +177,7 @@ namespace ImageToolbox
         {
             Label label = new Label();
             label.Text = text;
-            label.Location = new Point(10, y + 6);
+            label.Location = new Point(10, y + 2);
             label.AutoSize = true;
             parent.Controls.Add(label);
 
@@ -180,13 +188,13 @@ namespace ImageToolbox
             bar.Maximum = max;
             bar.Value = value;
             bar.Location = new Point(78, y);
-            bar.Size = new Size(168, 30);
+            bar.Size = new Size(132, 20);
             parent.Controls.Add(bar);
 
             valueLabel = new Label();
             valueLabel.Text = value.ToString();
-            valueLabel.Location = new Point(250, y + 6);
-            valueLabel.Size = new Size(50, 20);
+            valueLabel.Location = new Point(214, y + 2);
+            valueLabel.Size = new Size(36, 16);
             valueLabel.TextAlign = ContentAlignment.MiddleRight;
             parent.Controls.Add(valueLabel);
 
@@ -198,7 +206,7 @@ namespace ImageToolbox
             ComboBox box = new ComboBox();
             box.DropDownStyle = ComboBoxStyle.DropDownList;
             box.Location = new Point(10, y);
-            box.Size = new Size(290, 25);
+            box.Size = new Size(250, 22);
             for (int i = 0; i < items.Length; i++)
             {
                 box.Items.Add(items[i]);
@@ -213,7 +221,7 @@ namespace ImageToolbox
             Button button = new Button();
             button.Text = text;
             button.Location = new Point(x, y);
-            button.Size = new Size(width, 30);
+            button.Size = new Size(width, 22);
             button.Click += onClick;
             parent.Controls.Add(button);
             return button;
