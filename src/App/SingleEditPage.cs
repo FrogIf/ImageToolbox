@@ -639,18 +639,17 @@ namespace ImageToolbox
                 else
                 {
                     Bitmap activePreview = (opPreview != null) ? opPreview : _previewSource;
-                    if (_session.HasVisibleLayerAbove(_session.ActiveIndex))
-                    {
-                        // 当前图层不在最上层：快速合成路径会把当前图层画在最上面（顺序错误），
-                        // 必须按真实堆叠顺序整图合成。
-                        display = _session.CompositePreview(_session.ActiveIndex, activePreview, PreviewSize);
-                        ownDisplay = true;
-                        _composeValid = false;
-                    }
-                    else
+                    if (_session.CanReuseComposite(_session.ActiveIndex))
                     {
                         display = ComposeLayerPreview(activePreview);
                         ownDisplay = false;
+                    }
+                    else
+                    {
+                        // 当前图层上方有混合模式/半透明的图层：无法预合并，按真实堆叠顺序整图合成。
+                        display = _session.CompositePreview(_session.ActiveIndex, activePreview, PreviewSize);
+                        ownDisplay = true;
+                        _composeValid = false;
                     }
                     if (disposeOp)
                     {

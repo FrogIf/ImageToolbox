@@ -14,11 +14,12 @@ namespace ImageToolbox
         private readonly List<EditCommand> _undo = new List<EditCommand>();
         private readonly List<EditCommand> _redo = new List<EditCommand>();
         private readonly Dictionary<EditLayer, PreviewEntry> _previewCache = new Dictionary<EditLayer, PreviewEntry>();
-        private Bitmap _bgCache;          // 除当前图层外、其余可见图层的合成（实时绘制时静态不变，缓存避免每帧重画）
+        private Bitmap _bgBelow;          // 当前图层之下所有可见图层的合成（实时绘制时静态不变，缓存避免每帧重画）
+        private Bitmap _bgAbove;          // 当前图层之上所有可见图层的合成（仅当它们都是普通+不透明+无偏移时才有值）
         private int _bgCacheLayer = int.MinValue;
         private int _bgCacheMax;
         private int _bgCacheVersion = -1;
-        private int _version;             // 任何图层结构/属性/内容变化时自增，用于失效 _bgCache
+        private int _version;             // 任何图层结构/属性/内容变化时自增，用于失效背景缓存
 
         private int _active = -1;
         private int _width;
@@ -69,16 +70,17 @@ namespace ImageToolbox
             }
         }
 
-        // 当前图层之上是否还有可见图层。编辑器只在「当前图层位于最上层」时走
-        // 复用的快速合成（该路径把当前图层画在最上面），否则必须按真实堆叠顺序整图合成。
-        public bool HasVisibleLayerAbove(int layerIndex)
+        // 复用合成要求：当前图层**之上**的每个可见图层都是普通+不透明+无偏移，
+        // 这样它们可以先合并成一张位图再叠加（否则混合模式需要真实底图，只能整图合成）。
+        public bool CanReuseComposite(int layerIndex)
         {
             for (int i = layerIndex + 1; i < _layers.Count; i++)
             {
                 EditLayer l = _layers[i];
-                if (l.Visible && l.Opacity > 0f && l.Image != null) { return true; }
+                if (!l.Visible || l.Opacity <= 0f || l.Image == null) { continue; }
+                if (l.Mode != BlendMode.Normal || l.Opacity < 1f || l.Offset != Point.Empty) { return false; }
             }
-            return false;
+            return true;
         }
 
         public void SetOriginal(Bitmap image)
@@ -374,25 +376,43 @@ namespace ImageToolbox
             return acc;
         }
 
-        // 除 layerIndex 外、其余可见图层的合成预览（含混合模式/透明度/偏移）。
-        // 实时绘制时这些图层不变，缓存后每帧只需重画当前图层，避免整栈重合成。
-        public Bitmap BackgroundPreview(int layerIndex, int maxSize)
+        private void DisposeBackground()
         {
-            if (!HasImage) { return null; }
-            if (_bgCache != null && _bgCacheLayer == layerIndex && _bgCacheMax == maxSize && _bgCacheVersion == _version)
+            if (_bgBelow != null) { _bgBelow.Dispose(); _bgBelow = null; }
+            if (_bgAbove != null) { _bgAbove.Dispose(); _bgAbove = null; }
+            _bgCacheVersion = -1;
+        }
+
+        // 计算并缓存「当前图层之下」/「之上」的合成。之上仅在全部为普通+不透明+无偏移时才有值
+        // （此时它们可先合并再叠加）；否则为 null，编辑器必须回退到有序的整图合成。
+        private void EnsureBackground(int layerIndex, int maxSize)
+        {
+            if (_bgCacheLayer == layerIndex && _bgCacheMax == maxSize && _bgCacheVersion == _version)
             {
-                return _bgCache;
+                return;
             }
-            if (_bgCache != null) { _bgCache.Dispose(); _bgCache = null; }
+            DisposeBackground();
+            _bgBelow = BuildSide(layerIndex, false, maxSize);
+            _bgAbove = BuildSide(layerIndex, true, maxSize);
+            _bgCacheLayer = layerIndex;
+            _bgCacheMax = maxSize;
+            _bgCacheVersion = _version;
+            PrunePreviewCache();
+        }
+
+        private Bitmap BuildSide(int layerIndex, bool above, int maxSize)
+        {
+            int lo = above ? layerIndex + 1 : 0;
+            int hi = above ? _layers.Count : layerIndex;
             Bitmap acc = null;
             Graphics g = null;
             try
             {
-                for (int i = 0; i < _layers.Count; i++)
+                for (int i = lo; i < hi; i++)
                 {
-                    if (i == layerIndex) { continue; }
                     EditLayer layer = _layers[i];
                     if (!layer.Visible || layer.Opacity <= 0f || layer.Image == null) { continue; }
+                    if (above && (layer.Mode != BlendMode.Normal || layer.Opacity < 1f || layer.Offset != Point.Empty)) { continue; }
                     Bitmap part = PreviewOf(layer, maxSize);
                     if (part == null) { continue; }
                     if (acc == null)
@@ -427,27 +447,23 @@ namespace ImageToolbox
             {
                 if (g != null) { g.Dispose(); }
             }
-            if (acc == null) { acc = new Bitmap(1, 1, PixelFormat.Format32bppArgb); }
-            PrunePreviewCache();
-            _bgCache = acc;
-            _bgCacheLayer = layerIndex;
-            _bgCacheMax = maxSize;
-            _bgCacheVersion = _version;
             return acc;
         }
 
-        // 把「缓存的背景 + 当前图层内容」合成进调用方复用的 buffer，避免每帧新建整图。
-        // whole=false 时只重画 dirty 区域（当前图层为普通+不透明+无偏移时），实时绘制每帧只处理笔触范围。
+        // 把「缓存的背景（下 + 当前 + 上）+ 当前图层内容」合成进调用方复用的 buffer，避免每帧新建整图。
+        // 仅在 CanReuseComposite(layerIndex) 为真时调用。whole=false 时只重画 dirty 区域
+        // （当前图层为普通+不透明+无偏移时），实时绘制每帧只处理笔触范围。
         public void CompositePreviewOver(Bitmap buffer, int layerIndex, Bitmap replacement, int maxSize, Rectangle dirty, bool whole)
         {
             if (buffer == null || replacement == null) { return; }
-            Bitmap bg = BackgroundPreview(layerIndex, maxSize);
+            EnsureBackground(layerIndex, maxSize);
             Rectangle full = new Rectangle(0, 0, buffer.Width, buffer.Height);
             EditLayer a = ActiveLayer;
             bool activeVisible = a != null && a.Visible && a.Opacity > 0f;
             bool fastActive = activeVisible && a.Mode == BlendMode.Normal && a.Opacity >= 1f && a.Offset == Point.Empty;
-            bool hasBg = bg != null && bg.Width == buffer.Width && bg.Height == buffer.Height;
-            bool useDirty = !whole && fastActive && hasBg && !dirty.IsEmpty;
+            bool hasBelow = _bgBelow != null && _bgBelow.Width == buffer.Width && _bgBelow.Height == buffer.Height;
+            bool hasAbove = _bgAbove != null && _bgAbove.Width == buffer.Width && _bgAbove.Height == buffer.Height;
+            bool useDirty = !whole && fastActive && !dirty.IsEmpty;
 
             Graphics g = Graphics.FromImage(buffer);
             try
@@ -455,17 +471,22 @@ namespace ImageToolbox
                 g.InterpolationMode = InterpolationMode.NearestNeighbor;
                 g.PixelOffsetMode = PixelOffsetMode.Half;
                 if (useDirty) { g.SetClip(dirty); }
+
+                // 1) 当前图层下方
                 g.CompositingMode = CompositingMode.SourceCopy;
-                if (hasBg) { g.DrawImage(bg, full); }
+                if (hasBelow) { g.DrawImage(_bgBelow, full); }
+                else if (useDirty) { using (SolidBrush clear = new SolidBrush(Color.Transparent)) { g.FillRectangle(clear, full); } }
                 else { g.Clear(Color.Transparent); }
                 g.CompositingMode = CompositingMode.SourceOver;
+
+                // 2) 当前图层
                 if (fastActive)
                 {
                     g.DrawImage(replacement, full);
                 }
                 else if (activeVisible)
                 {
-                    // 非普通模式需逐像素且会写整图，先让出 Graphics。
+                    // 非普通模式需逐像素且会写整图：让出 Graphics，整块合成后再补画上方（上方也是整图）。
                     g.ResetClip();
                     g.Dispose();
                     g = null;
@@ -473,7 +494,19 @@ namespace ImageToolbox
                     int offX = (int)Math.Round(a.Offset.X * s);
                     int offY = (int)Math.Round(a.Offset.Y * s);
                     ImageBlend.CompositeInto(buffer, replacement, a.Mode, a.Opacity, offX, offY);
+                    if (hasAbove)
+                    {
+                        g = Graphics.FromImage(buffer);
+                        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                        g.PixelOffsetMode = PixelOffsetMode.Half;
+                        g.CompositingMode = CompositingMode.SourceOver;
+                        g.DrawImage(_bgAbove, full);
+                    }
+                    return;
                 }
+
+                // 3) 当前图层上方
+                if (hasAbove) { g.DrawImage(_bgAbove, full); }
             }
             finally
             {
@@ -754,8 +787,7 @@ namespace ImageToolbox
                 DisposeEntry(entry);
             }
             _previewCache.Clear();
-            if (_bgCache != null) { _bgCache.Dispose(); _bgCache = null; }
-            _bgCacheVersion = -1;
+            DisposeBackground();
         }
 
         private int Clamp(int index)
