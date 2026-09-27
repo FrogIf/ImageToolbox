@@ -49,6 +49,11 @@ namespace ImageToolbox
         public event Action DragFinished;
         public event Action ViewChanged;
 
+        // 叠加绘制（图像之上，客户区坐标）：编辑器转发给当前操作绘制变换框等。
+        public Action<Graphics> OverlayPainter;
+        // 悬停光标：输入显示图坐标，返回 null 用默认光标（如变换框手柄）。
+        public Func<Point, Cursor> CursorProvider;
+
         // 文字在画布上就地编辑时置 true：空格键交给输入框，不触发平移。
         public bool TextEditing { get; set; }
 
@@ -335,6 +340,11 @@ namespace ImageToolbox
                     e.Graphics.DrawEllipse(pen2, center.X - radius, center.Y - radius, radius * 2f, radius * 2f);
                 }
             }
+
+            if (OverlayPainter != null)
+            {
+                OverlayPainter(e.Graphics);
+            }
         }
 
         private static Bitmap _checker;
@@ -450,6 +460,23 @@ namespace ImageToolbox
             }
         }
 
+        // 悬停光标：优先交给 CursorProvider（如变换框手柄），否则回退到默认/拖动光标。
+        private void ApplyHoverCursor()
+        {
+            if (_spaceDown || _panning)
+            {
+                Cursor = Cursors.SizeAll;
+                return;
+            }
+            if (CursorProvider != null)
+            {
+                Cursor provided = CursorProvider(_hoverPoint);
+                Cursor = (provided != null) ? provided : Cursors.Default;
+                return;
+            }
+            UpdateCursor();
+        }
+
         // 显示图坐标 -> 控件坐标（供文字就地编辑等叠加控件定位）。
         public PointF ImageToClient(PointF imagePoint)
         {
@@ -479,6 +506,20 @@ namespace ImageToolbox
             x = Math.Max(0, Math.Min(_image.Width, x));
             y = Math.Max(0, Math.Min(_image.Height, y));
             return new Point(x, y);
+        }
+
+        // 不裁剪到图像边界的显示图坐标：变换框的手柄（如旋转柄）可能落在图像外的留白区，
+        // 仍要能命中，所以拖动/悬停用这个版本。
+        private Point ControlToImageRaw(Point point)
+        {
+            if (_image == null || _scale <= 0f)
+            {
+                return Point.Empty;
+            }
+
+            return new Point(
+                (int)Math.Round((point.X - _imageRect.X) / _scale),
+                (int)Math.Round((point.Y - _imageRect.Y) / _scale));
         }
 
         private RectangleF ImageToControl(Rectangle rect)
@@ -516,7 +557,8 @@ namespace ImageToolbox
             }
 
             _hovering = true;
-            _hoverPoint = ControlToImage(e.Location);
+            // 拖动模式（如变换框）需要留白区的真实坐标，不能被裁剪到图像边界。
+            _hoverPoint = _dragEnabled ? ControlToImageRaw(e.Location) : ControlToImage(e.Location);
 
             if (_dragEnabled)
             {
@@ -578,7 +620,8 @@ namespace ImageToolbox
             }
 
             _hovering = true;
-            _hoverPoint = ControlToImage(e.Location);
+            _hoverPoint = _dragEnabled ? ControlToImageRaw(e.Location) : ControlToImage(e.Location);
+            ApplyHoverCursor();
 
             if (_dragEnabled)
             {
@@ -696,6 +739,7 @@ namespace ImageToolbox
             if (_hovering)
             {
                 _hovering = false;
+                Cursor = Cursors.Default;
                 Invalidate();
             }
         }

@@ -14,6 +14,11 @@ namespace ImageToolbox
         private readonly List<EditCommand> _undo = new List<EditCommand>();
         private readonly List<EditCommand> _redo = new List<EditCommand>();
         private readonly Dictionary<EditLayer, PreviewEntry> _previewCache = new Dictionary<EditLayer, PreviewEntry>();
+        private Bitmap _bgCache;          // 除当前图层外、其余可见图层的合成（实时绘制时静态不变，缓存避免每帧重画）
+        private int _bgCacheLayer = int.MinValue;
+        private int _bgCacheMax;
+        private int _bgCacheVersion = -1;
+        private int _version;             // 任何图层结构/属性/内容变化时自增，用于失效 _bgCache
 
         private int _active = -1;
         private int _width;
@@ -308,28 +313,159 @@ namespace ImageToolbox
         {
             if (!HasImage) { return null; }
             Bitmap acc = null;
-            for (int i = 0; i < _layers.Count; i++)
+            Graphics g = null;
+            try
             {
-                EditLayer layer = _layers[i];
-                if (!layer.Visible || layer.Opacity <= 0f || layer.Image == null) { continue; }
-                Bitmap part = (i == layerIndex && replacement != null) ? replacement : PreviewOf(layer, maxSize);
-                if (part == null) { continue; }
-                if (acc == null)
+                for (int i = 0; i < _layers.Count; i++)
                 {
-                    acc = new Bitmap(part.Width, part.Height, PixelFormat.Format32bppArgb);
-                    using (Graphics g = Graphics.FromImage(acc))
+                    EditLayer layer = _layers[i];
+                    if (!layer.Visible || layer.Opacity <= 0f || layer.Image == null) { continue; }
+                    Bitmap part = (i == layerIndex && replacement != null) ? replacement : PreviewOf(layer, maxSize);
+                    if (part == null) { continue; }
+                    if (acc == null)
                     {
+                        acc = new Bitmap(part.Width, part.Height, PixelFormat.Format32bppArgb);
+                        g = Graphics.FromImage(acc);
+                        g.CompositingMode = CompositingMode.SourceOver;
+                        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                        g.PixelOffsetMode = PixelOffsetMode.Half;
                         g.Clear(Color.Transparent);
                     }
+                    float s = (float)acc.Width / _width;
+                    int offX = (int)Math.Round(layer.Offset.X * s);
+                    int offY = (int)Math.Round(layer.Offset.Y * s);
+                    if (layer.Mode == BlendMode.Normal && layer.Opacity >= 1f)
+                    {
+                        // 快路径：普通+不透明图层用 GDI+ 原生 source-over 叠加，比逐像素合成快一个数量级，
+                        // 这是多图层下实时绘制流畅的关键。
+                        g.DrawImage(part, new Rectangle(offX, offY, part.Width, part.Height));
+                    }
+                    else
+                    {
+                        // 混合模式/半透明仍需逐像素，先让出 Graphics 释放对 acc 的占用。
+                        g.Dispose();
+                        g = null;
+                        ImageBlend.CompositeInto(acc, part, layer.Mode, layer.Opacity, offX, offY);
+                        g = Graphics.FromImage(acc);
+                        g.CompositingMode = CompositingMode.SourceOver;
+                        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                        g.PixelOffsetMode = PixelOffsetMode.Half;
+                    }
                 }
-                float s = (float)acc.Width / _width;
-                int offX = (int)Math.Round(layer.Offset.X * s);
-                int offY = (int)Math.Round(layer.Offset.Y * s);
-                ImageBlend.CompositeInto(acc, part, layer.Mode, layer.Opacity, offX, offY);
+            }
+            finally
+            {
+                if (g != null) { g.Dispose(); }
             }
             if (acc == null) { acc = new Bitmap(1, 1, PixelFormat.Format32bppArgb); }
             PrunePreviewCache();
             return acc;
+        }
+
+        // 除 layerIndex 外、其余可见图层的合成预览（含混合模式/透明度/偏移）。
+        // 实时绘制时这些图层不变，缓存后每帧只需重画当前图层，避免整栈重合成。
+        public Bitmap BackgroundPreview(int layerIndex, int maxSize)
+        {
+            if (!HasImage) { return null; }
+            if (_bgCache != null && _bgCacheLayer == layerIndex && _bgCacheMax == maxSize && _bgCacheVersion == _version)
+            {
+                return _bgCache;
+            }
+            if (_bgCache != null) { _bgCache.Dispose(); _bgCache = null; }
+            Bitmap acc = null;
+            Graphics g = null;
+            try
+            {
+                for (int i = 0; i < _layers.Count; i++)
+                {
+                    if (i == layerIndex) { continue; }
+                    EditLayer layer = _layers[i];
+                    if (!layer.Visible || layer.Opacity <= 0f || layer.Image == null) { continue; }
+                    Bitmap part = PreviewOf(layer, maxSize);
+                    if (part == null) { continue; }
+                    if (acc == null)
+                    {
+                        acc = new Bitmap(part.Width, part.Height, PixelFormat.Format32bppArgb);
+                        g = Graphics.FromImage(acc);
+                        g.CompositingMode = CompositingMode.SourceOver;
+                        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                        g.PixelOffsetMode = PixelOffsetMode.Half;
+                        g.Clear(Color.Transparent);
+                    }
+                    float s = (float)acc.Width / _width;
+                    int offX = (int)Math.Round(layer.Offset.X * s);
+                    int offY = (int)Math.Round(layer.Offset.Y * s);
+                    if (layer.Mode == BlendMode.Normal && layer.Opacity >= 1f)
+                    {
+                        g.DrawImage(part, new Rectangle(offX, offY, part.Width, part.Height));
+                    }
+                    else
+                    {
+                        g.Dispose();
+                        g = null;
+                        ImageBlend.CompositeInto(acc, part, layer.Mode, layer.Opacity, offX, offY);
+                        g = Graphics.FromImage(acc);
+                        g.CompositingMode = CompositingMode.SourceOver;
+                        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                        g.PixelOffsetMode = PixelOffsetMode.Half;
+                    }
+                }
+            }
+            finally
+            {
+                if (g != null) { g.Dispose(); }
+            }
+            if (acc == null) { acc = new Bitmap(1, 1, PixelFormat.Format32bppArgb); }
+            PrunePreviewCache();
+            _bgCache = acc;
+            _bgCacheLayer = layerIndex;
+            _bgCacheMax = maxSize;
+            _bgCacheVersion = _version;
+            return acc;
+        }
+
+        // 把「缓存的背景 + 当前图层内容」合成进调用方复用的 buffer，避免每帧新建整图。
+        // whole=false 时只重画 dirty 区域（当前图层为普通+不透明+无偏移时），实时绘制每帧只处理笔触范围。
+        public void CompositePreviewOver(Bitmap buffer, int layerIndex, Bitmap replacement, int maxSize, Rectangle dirty, bool whole)
+        {
+            if (buffer == null || replacement == null) { return; }
+            Bitmap bg = BackgroundPreview(layerIndex, maxSize);
+            Rectangle full = new Rectangle(0, 0, buffer.Width, buffer.Height);
+            EditLayer a = ActiveLayer;
+            bool fastActive = a != null && a.Mode == BlendMode.Normal && a.Opacity >= 1f && a.Offset == Point.Empty;
+            bool hasBg = bg != null && bg.Width == buffer.Width && bg.Height == buffer.Height;
+            bool useDirty = !whole && fastActive && hasBg && !dirty.IsEmpty;
+
+            Graphics g = Graphics.FromImage(buffer);
+            try
+            {
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                if (useDirty) { g.SetClip(dirty); }
+                g.CompositingMode = CompositingMode.SourceCopy;
+                if (hasBg) { g.DrawImage(bg, full); }
+                else { g.Clear(Color.Transparent); }
+                g.CompositingMode = CompositingMode.SourceOver;
+                if (fastActive)
+                {
+                    g.DrawImage(replacement, full);
+                }
+                else if (a != null)
+                {
+                    // 非普通模式需逐像素且会写整图，先让出 Graphics。
+                    g.ResetClip();
+                    g.Dispose();
+                    g = null;
+                    float s = (float)buffer.Width / _width;
+                    int offX = (int)Math.Round(a.Offset.X * s);
+                    int offY = (int)Math.Round(a.Offset.Y * s);
+                    ImageBlend.CompositeInto(buffer, replacement, a.Mode, a.Opacity, offX, offY);
+                }
+            }
+            finally
+            {
+                if (g != null) { g.Dispose(); }
+            }
         }
 
         public void DisposeAll()
@@ -605,6 +741,8 @@ namespace ImageToolbox
                 DisposeEntry(entry);
             }
             _previewCache.Clear();
+            if (_bgCache != null) { _bgCache.Dispose(); _bgCache = null; }
+            _bgCacheVersion = -1;
         }
 
         private int Clamp(int index)
@@ -615,6 +753,7 @@ namespace ImageToolbox
 
         private void Notify()
         {
+            _version++;
             if (Changed != null)
             {
                 Changed(this, EventArgs.Empty);

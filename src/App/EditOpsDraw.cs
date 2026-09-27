@@ -53,20 +53,19 @@ namespace ImageToolbox
         }
     }
 
-    // 绘画 / 标注：直线、箭头、画笔、记号笔、橡皮擦、模糊、马赛克、文字、形状。
-    // 矢量图元（线/箭头/画笔/记号笔/文字/形状）以“源图坐标”记录，预览与全分辨率都重绘；
+    // 绘画 / 标注：直线、箭头、画笔、橡皮擦、模糊、马赛克、文字、形状。
+    // 矢量图元（线/箭头/画笔/文字/形状）以“源图坐标”记录，预览与全分辨率都重绘；
     // 栅格效果（橡皮擦/模糊/马赛克）直接在底图上按蒙版作用，全分辨率时按组重放。
     public class DrawOp : EditOpPanel
     {
         private const int ToolLine = 0;
         private const int ToolArrow = 1;
         private const int ToolPen = 2;
-        private const int ToolMarker = 3;
-        private const int ToolEraser = 4;
-        private const int ToolBlur = 5;
-        private const int ToolMosaic = 6;
-        private const int ToolText = 7;
-        private const int ToolShape = 8;
+        private const int ToolEraser = 3;
+        private const int ToolBlur = 4;
+        private const int ToolMosaic = 5;
+        private const int ToolText = 6;
+        private const int ToolShape = 7;
 
         private const int ShapeRect = 0;
         private const int ShapeRoundRect = 1;
@@ -97,6 +96,7 @@ namespace ImageToolbox
             public int Kind;
             public int Strength;
             public int Width;
+            public float Opacity;
             public List<Point> Points;
         }
 
@@ -104,8 +104,8 @@ namespace ImageToolbox
         private ComboBox _shape;
         private CheckBox _fill;
         private Panel _swatch;
-        private TrackBar _width, _strength, _font;
-        private Label _widthV, _strengthV, _fontV;
+        private TrackBar _width, _strength, _font, _opacity;
+        private Label _widthV, _strengthV, _fontV, _opacityV;
         private TextBox _textBox;
         private Button _okButton;
         private Button _cancelButton;
@@ -113,8 +113,9 @@ namespace ImageToolbox
         private Point _textPoint;
         private Color _color = Color.FromArgb(255, 230, 40, 40);
 
-        private readonly List<Item> _items = new List<Item>();
-        private readonly List<Effect> _effects = new List<Effect>();
+        // 按绘制顺序记录所有已完成笔画：Item=矢量图元，Effect=栅格效果（橡皮擦/模糊/马赛克）。
+        // 单一有序列表使栅格效果能作用于它之前画的图元（否则橡皮擦擦不掉未应用的直线）。
+        private readonly List<object> _strokes = new List<object>();
         private Item _current;
         private Effect _effect;
         private Point _anchor;
@@ -128,6 +129,10 @@ namespace ImageToolbox
         private Bitmap _stamp;
         private int _stampRadius;
         private float _previewScale = 1f;
+        private Rectangle _dirty;            // 自上次 RenderPreview 起，_work 变化的区域（预览坐标）
+        private bool _dirtyWhole = true;     // 变化覆盖整图（无法局部重合成）
+        private Rectangle _reportedDirty;
+        private bool _reportedWhole = true;
 
         public DrawOp()
         {
@@ -136,7 +141,7 @@ namespace ImageToolbox
             EditOpUi.Caption(this, "工具", 44);
             _tool = EditOpUi.Combo(this, 64, new string[]
             {
-                "直线", "箭头", "画笔", "记号笔", "橡皮擦", "模糊", "马赛克", "文字", "形状"
+                "直线", "箭头", "画笔", "橡皮擦", "模糊", "马赛克", "文字", "形状"
             }, 0);
             _tool.SelectedIndexChanged += delegate
             {
@@ -166,20 +171,28 @@ namespace ImageToolbox
 
             _width = EditOpUi.Slider(this, "粗细", 190, 1, 80, 8, out _widthV);
             _width.ValueChanged += delegate { _widthV.Text = _width.Value.ToString(); RaisePreview(); };
-            _strength = EditOpUi.Slider(this, "强度", 226, 1, 80, 20, out _strengthV);
+            _opacity = EditOpUi.Slider(this, "不透明度", 226, 0, 100, 100, out _opacityV);
+            _opacity.ValueChanged += delegate { _opacityV.Text = _opacity.Value.ToString(); };
+            _strength = EditOpUi.Slider(this, "强度", 262, 1, 80, 20, out _strengthV);
             _strength.ValueChanged += delegate { _strengthV.Text = _strength.Value.ToString(); RaisePreview(); };
-            _font = EditOpUi.Slider(this, "字号", 262, 8, 240, 48, out _fontV);
+            _font = EditOpUi.Slider(this, "字号", 298, 8, 240, 48, out _fontV);
             _font.ValueChanged += delegate { _fontV.Text = _font.Value.ToString(); PlaceTextOverlay(); RaisePreview(); };
 
-            EditOpUi.Button(this, "撤销一笔", 10, 304, 100, delegate { UndoLast(); });
-            EditOpUi.Button(this, "清除全部", 118, 304, 100, delegate { ClearAll(); });
-            EditOpUi.Note(this, "在画布上拖动绘制；直线/箭头/形状为按住拖出，文字为单击后就地输入（回车换行，✓ 确认）。橡皮擦/模糊/马赛克为涂抹式，强度控制模糊半径或马赛克块大小。", 344, 84);
+            EditOpUi.Button(this, "撤销一笔", 10, 340, 100, delegate { UndoLast(); });
+            EditOpUi.Button(this, "清除全部", 118, 340, 100, delegate { ClearAll(); });
+            EditOpUi.Note(this, "在画布上拖动绘制；直线/箭头/形状为按住拖出，文字为单击后就地输入（回车换行，✓ 确认）。橡皮擦/模糊/马赛克为涂抹式，强度控制模糊半径或马赛克块大小。不透明度控制整笔的透明程度。", 380, 84);
 
             UpdateSwatch();
             UpdateToolUi();
         }
 
         public override bool LivePreview
+        {
+            get { return true; }
+        }
+
+        // 画笔的预览就是主要反馈，必须同步刷新才能紧贴鼠标（多图层下尤其明显）。
+        public override bool ImmediatePreview
         {
             get { return true; }
         }
@@ -217,15 +230,13 @@ namespace ImageToolbox
         {
             RemoveTextOverlay();
             DisposeBitmaps();
-            _items.Clear();
-            _effects.Clear();
+            _strokes.Clear();
         }
 
         protected override void OnResetState()
         {
             RemoveTextOverlay();
-            _items.Clear();
-            _effects.Clear();
+            _strokes.Clear();
             _current = null;
             _effect = null;
             Rebuild();
@@ -276,16 +287,80 @@ namespace ImageToolbox
 
         private void Rebuild()
         {
-            if (_committed == null || _work == null || _previewBase == null) { return; }
-            using (Graphics g = Graphics.FromImage(_committed))
-            {
-                g.CompositingMode = CompositingMode.SourceCopy;
-                g.DrawImage(_previewBase, new Rectangle(0, 0, _committed.Width, _committed.Height));
-            }
-            ComposeWork();
+            // 从底图按顺序重放所有已完成笔画（重新挂载位图后仍保留已画内容）。
+            RebuildFromStrokes();
         }
 
-        // _work = _committed（含栅格效果）+ 所有矢量图元 + 正在绘制的图元。
+        // 标记 _work 的变化区域（预览坐标）；调用了 MarkDirtyWhole 后本帧将整图重合成。
+        private void MarkDirty(Rectangle r)
+        {
+            if (_dirtyWhole || _work == null) { return; }
+            r = Rectangle.Intersect(r, new Rectangle(0, 0, _work.Width, _work.Height));
+            if (r.Width <= 0 || r.Height <= 0) { return; }
+            _dirty = _dirty.IsEmpty ? r : Rectangle.Union(_dirty, r);
+        }
+
+        private void MarkDirtyWhole()
+        {
+            _dirtyWhole = true;
+        }
+
+        // 图元的外接矩形（源图坐标），保守放大以覆盖线宽、箭头、端点等。
+        private Rectangle ItemBounds(Item it)
+        {
+            if (it == null) { return Rectangle.Empty; }
+            float pad = Math.Max(1f, it.Width) * 3f + 12f;
+            float x0, y0, x1, y1;
+            if (it.Points != null && it.Points.Count > 0)
+            {
+                x0 = x1 = it.Points[0].X;
+                y0 = y1 = it.Points[0].Y;
+                for (int i = 1; i < it.Points.Count; i++)
+                {
+                    x0 = Math.Min(x0, it.Points[i].X); y0 = Math.Min(y0, it.Points[i].Y);
+                    x1 = Math.Max(x1, it.Points[i].X); y1 = Math.Max(y1, it.Points[i].Y);
+                }
+            }
+            else
+            {
+                x0 = Math.Min(it.Start.X, it.End.X); y0 = Math.Min(it.Start.Y, it.End.Y);
+                x1 = Math.Max(it.Start.X, it.End.X); y1 = Math.Max(it.Start.Y, it.End.Y);
+            }
+            float fx = x0 * _previewScale - pad, fy = y0 * _previewScale - pad;
+            float fw = (x1 - x0) * _previewScale + pad * 2f, fh = (y1 - y0) * _previewScale + pad * 2f;
+            return Rectangle.Round(new RectangleF(fx, fy, fw, fh));
+        }
+
+        private void MarkCurrentDirty()
+        {
+            if (_current != null && _current.Tool != ToolText) { MarkDirty(ItemBounds(_current)); }
+        }
+
+        // 自由笔画一帧只新增一段：脏区取该段的范围（含线宽），避免随笔画变长而整段重合成。
+        private void MarkSegmentDirty(Point a, Point b, float width)
+        {
+            float pad = Math.Max(1f, width) * 0.75f + 4f;
+            float x0 = Math.Min(a.X, b.X) * _previewScale - pad;
+            float y0 = Math.Min(a.Y, b.Y) * _previewScale - pad;
+            float x1 = Math.Max(a.X, b.X) * _previewScale + pad;
+            float y1 = Math.Max(a.Y, b.Y) * _previewScale + pad;
+            MarkDirty(Rectangle.Round(new RectangleF(x0, y0, x1 - x0, y1 - y0)));
+        }
+
+        // 把一个已完成的矢量图元按预览比例烘焙进 _committed，使后续的橡皮擦/模糊/马赛克能作用到它。
+        private void BakeItem(Item item)
+        {
+            if (_committed == null || item == null) { return; }
+            using (Graphics g = Graphics.FromImage(_committed))
+            {
+                g.ScaleTransform(_previewScale, _previewScale);
+                DrawItem(g, item);
+            }
+            if (item.Tool == ToolText) { MarkDirtyWhole(); }
+            else { MarkDirty(ItemBounds(item)); }
+        }
+
+        // _work = _committed（已按顺序烘焙：底图 + 矢量图元 + 栅格效果）+ 正在绘制的矢量图元。
         private void ComposeWork()
         {
             if (_work == null || _committed == null) { return; }
@@ -294,11 +369,13 @@ namespace ImageToolbox
                 g.CompositingMode = CompositingMode.SourceCopy;
                 g.DrawImage(_committed, new Rectangle(0, 0, _work.Width, _work.Height));
             }
-            using (Graphics g = Graphics.FromImage(_work))
+            if (_current != null)
             {
-                g.ScaleTransform(_previewScale, _previewScale);
-                for (int i = 0; i < _items.Count; i++) { DrawItem(g, _items[i]); }
-                if (_current != null) { DrawItem(g, _current); }
+                using (Graphics g = Graphics.FromImage(_work))
+                {
+                    g.ScaleTransform(_previewScale, _previewScale);
+                    DrawItem(g, _current);
+                }
             }
         }
 
@@ -329,6 +406,7 @@ namespace ImageToolbox
                         _current.Points = new List<Point>();
                         _current.Points.Add(imagePoint);
                     }
+                    MarkCurrentDirty();
                     ComposeWork();
                 }
             }
@@ -342,13 +420,16 @@ namespace ImageToolbox
                         Point lp = _current.Points[_current.Points.Count - 1];
                         if (lp.X != imagePoint.X || lp.Y != imagePoint.Y)
                         {
+                            MarkSegmentDirty(lp, imagePoint, _current.Width);
                             _current.Points.Add(imagePoint);
                             ComposeWork();
                         }
                     }
                     else
                     {
+                        MarkCurrentDirty();
                         _current.End = imagePoint;
+                        MarkCurrentDirty();
                         ComposeWork();
                     }
                 }
@@ -358,13 +439,15 @@ namespace ImageToolbox
                 if (_effect != null) { EndEffect(); }
                 else if (_current != null)
                 {
+                    MarkCurrentDirty();
                     if (!IsFreehand(_current.Tool) && _current.End == _current.Start)
                     {
                         _current = null;
                     }
                     else
                     {
-                        _items.Add(_current);
+                        _strokes.Add(_current);
+                        BakeItem(_current);
                         _current = null;
                     }
                     ComposeWork();
@@ -375,7 +458,7 @@ namespace ImageToolbox
 
         private static bool IsFreehand(int tool)
         {
-            return tool == ToolPen || tool == ToolMarker;
+            return tool == ToolPen;
         }
 
         private static bool IsRaster(int tool)
@@ -391,11 +474,23 @@ namespace ImageToolbox
             return -1;
         }
 
+        // 笔刷不透明度（0-100%），作用于新绘制的矢量图元与栅格笔画。
+        private float OpacityFactor
+        {
+            get { return _opacity.Value / 100f; }
+        }
+
+        private Color ApplyOpacity(Color c)
+        {
+            int a = (int)Math.Round(c.A * OpacityFactor);
+            return Color.FromArgb(a, c.R, c.G, c.B);
+        }
+
         private Item NewItem(int tool)
         {
             Item it = new Item();
             it.Tool = tool;
-            it.Color = _color;
+            it.Color = ApplyOpacity(_color);
             it.Width = _width.Value;
             it.Fill = _fill.Checked;
             it.ShapeKind = Math.Max(0, _shape.SelectedIndex);
@@ -410,12 +505,13 @@ namespace ImageToolbox
             _effect.Kind = EffectKindFor(tool);
             _effect.Strength = _strength.Value;
             _effect.Width = _width.Value;
+            _effect.Opacity = OpacityFactor;
             _effect.Points = new List<Point>();
             _effect.Points.Add(point);
 
             _stampRadius = Math.Max(1, (int)Math.Round((_width.Value / 2f) * _previewScale));
             if (_stamp != null) { _stamp.Dispose(); }
-            _stamp = CreateStamp(_stampRadius * 2);
+            _stamp = CreateStamp(_stampRadius * 2, _effect.Opacity);
 
             using (Graphics g = Graphics.FromImage(_mask)) { g.Clear(Color.Transparent); }
             if (_processed != null) { _processed.Dispose(); _processed = null; }
@@ -436,7 +532,7 @@ namespace ImageToolbox
 
         private void EndEffect()
         {
-            _effects.Add(_effect);
+            if (_effect != null) { _strokes.Add(_effect); }
             _effect = null;
             if (_processed != null) { _processed.Dispose(); _processed = null; }
             if (_stamp != null) { _stamp.Dispose(); _stamp = null; }
@@ -460,6 +556,7 @@ namespace ImageToolbox
             int minY = (int)Math.Floor(Math.Min(ay, by) - r) - 1;
             int maxX = (int)Math.Ceiling(Math.Max(ax, bx) + r) + 1;
             int maxY = (int)Math.Ceiling(Math.Max(ay, by) + r) + 1;
+            MarkDirty(new Rectangle(minX, minY, maxX - minX, maxY - minY));
             ApplyMasked(_committed, new Rectangle(minX, minY, maxX - minX, maxY - minY),
                 _mask, _processed, _effect.Kind == EffectErase);
             ComposeWork();
@@ -531,7 +628,7 @@ namespace ImageToolbox
             }
         }
 
-        private static Bitmap CreateStamp(int diameter)
+        private static Bitmap CreateStamp(int diameter, float opacity)
         {
             if (diameter < 2) { diameter = 2; }
             Bitmap stamp = new Bitmap(diameter, diameter, PixelFormat.Format32bppArgb);
@@ -546,7 +643,23 @@ namespace ImageToolbox
                 }
             }
             ImageFilters.GaussianBlur(stamp, inset);
-            return stamp;
+            if (opacity >= 0.999f) { return stamp; }
+
+            // 按不透明度缩放笔刷 alpha（在模糊之后），使整笔（含模糊/马赛克）都是半透明的。
+            Bitmap scaled = new Bitmap(stamp.Width, stamp.Height, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(scaled))
+            {
+                ColorMatrix cm = new ColorMatrix();
+                cm.Matrix33 = opacity;
+                using (ImageAttributes ia = new ImageAttributes())
+                {
+                    ia.SetColorMatrix(cm);
+                    g.DrawImage(stamp, new Rectangle(0, 0, stamp.Width, stamp.Height),
+                        0, 0, stamp.Width, stamp.Height, GraphicsUnit.Pixel, ia);
+                }
+            }
+            stamp.Dispose();
+            return scaled;
         }
 
         private static void DrawStampsBetween(Graphics g, Bitmap stamp, float radius, PointF a, PointF b)
@@ -568,42 +681,37 @@ namespace ImageToolbox
 
         private void UndoLast()
         {
-            if (_effects.Count > 0)
+            if (_strokes.Count > 0)
             {
-                _effects.RemoveAt(_effects.Count - 1);
-                RebuildFromEffects();
-                RaisePreview();
-            }
-            else if (_items.Count > 0)
-            {
-                _items.RemoveAt(_items.Count - 1);
-                ComposeWork();
+                _strokes.RemoveAt(_strokes.Count - 1);
+                RebuildFromStrokes();
                 RaisePreview();
             }
         }
 
         private void ClearAll()
         {
-            _items.Clear();
-            _effects.Clear();
+            _strokes.Clear();
             _current = null;
             _effect = null;
-            RebuildFromEffects();
+            RebuildFromStrokes();
             RaisePreview();
         }
 
-        private void RebuildFromEffects()
+        private void RebuildFromStrokes()
         {
             if (_committed == null || _previewBase == null) { return; }
+            MarkDirtyWhole();
             using (Graphics g = Graphics.FromImage(_committed))
             {
                 g.CompositingMode = CompositingMode.SourceCopy;
                 g.DrawImage(_previewBase, new Rectangle(0, 0, _committed.Width, _committed.Height));
             }
-            // 逐笔重放栅格效果（按顺序），使“撤销一笔”正确。
-            for (int i = 0; i < _effects.Count; i++)
+            // 按绘制顺序重放所有笔画（矢量图元 + 栅格效果），使“撤销一笔”正确。
+            for (int i = 0; i < _strokes.Count; i++)
             {
-                ReplayEffectPreview(_effects[i]);
+                if (_strokes[i] is Item) { BakeItem((Item)_strokes[i]); }
+                else { ReplayEffectPreview((Effect)_strokes[i]); }
             }
             ComposeWork();
         }
@@ -616,7 +724,7 @@ namespace ImageToolbox
                 g.Clear(Color.Transparent);
                 g.InterpolationMode = InterpolationMode.NearestNeighbor;
                 g.PixelOffsetMode = PixelOffsetMode.Half;
-                using (Bitmap stamp = CreateStamp((int)Math.Round(r * 2)))
+                using (Bitmap stamp = CreateStamp((int)Math.Round(r * 2), effect.Opacity))
                 {
                     PointF prev = new PointF(effect.Points[0].X * _previewScale, effect.Points[0].Y * _previewScale);
                     g.DrawImage(stamp, prev.X - r, prev.Y - r, r * 2f, r * 2f);
@@ -757,13 +865,14 @@ namespace ImageToolbox
 
             Item it = new Item();
             it.Tool = ToolText;
-            it.Color = _color;
+            it.Color = ApplyOpacity(_color);
             it.Width = _width.Value;
             it.Text = text;
             it.FontSize = _font.Value;
             it.Start = point;
             it.End = point;
-            _items.Add(it);
+            _strokes.Add(it);
+            BakeItem(it);
             ComposeWork();
             return true;
         }
@@ -864,9 +973,7 @@ namespace ImageToolbox
 
         private static Pen MakePen(Item it)
         {
-            Color c = it.Color;
-            if (it.Tool == ToolMarker) { c = Color.FromArgb(120, it.Color); }
-            Pen pen = new Pen(c, Math.Max(1f, it.Width));
+            Pen pen = new Pen(it.Color, Math.Max(1f, it.Width));
             pen.StartCap = LineCap.Round;
             pen.EndCap = LineCap.Round;
             pen.LineJoin = LineJoin.Round;
@@ -885,7 +992,7 @@ namespace ImageToolbox
             if (pts.Count == 1 || same)
             {
                 float r = Math.Max(1f, it.Width) / 2f;
-                using (SolidBrush brush = new SolidBrush(it.Tool == ToolMarker ? Color.FromArgb(120, it.Color) : it.Color))
+                using (SolidBrush brush = new SolidBrush(it.Color))
                 {
                     g.FillEllipse(brush, pts[0].X - r, pts[0].Y - r, r * 2f, r * 2f);
                 }
@@ -1064,63 +1171,73 @@ namespace ImageToolbox
 
         public override Bitmap RenderPreview()
         {
+            // 把自上次以来的变化区域交给编辑器（用于只重合成脏区），并重新开始累计。
+            _reportedDirty = _dirty;
+            _reportedWhole = _dirtyWhole;
+            _dirty = Rectangle.Empty;
+            _dirtyWhole = false;
             return _work;
+        }
+
+        public override bool TryGetPreviewDirtyRect(out Rectangle rect)
+        {
+            rect = _reportedDirty;
+            return !_reportedWhole;
         }
 
         public override Bitmap BuildResult()
         {
-            if (Source == null || (_items.Count == 0 && _effects.Count == 0))
+            if (Source == null || _strokes.Count == 0)
             {
                 return null;
             }
             Bitmap result = Clone(Source);
-            if (_effects.Count > 0) { ApplyEffectsFull(result); }
-            if (_items.Count > 0)
-            {
-                using (Graphics g = Graphics.FromImage(result))
-                {
-                    for (int i = 0; i < _items.Count; i++) { DrawItem(g, _items[i]); }
-                }
-            }
+            ApplyStrokesFull(result);
             return result;
         }
 
-        // 全分辨率重放栅格效果：相同（种类+强度）的笔画合并成一组，每组只做一次处理。
-        private void ApplyEffectsFull(Bitmap result)
+        // 全分辨率按绘制顺序重放：矢量图元直接重绘，栅格效果就地作用，因此橡皮擦/模糊/马赛克
+        // 能作用到它之前画的图元上。相邻的同种（种类+强度）效果合并成一组，每组只做一次处理。
+        private void ApplyStrokesFull(Bitmap result)
+        {
+            int i = 0;
+            while (i < _strokes.Count)
+            {
+                object s = _strokes[i];
+                if (s is Item)
+                {
+                    using (Graphics g = Graphics.FromImage(result)) { DrawItem(g, (Item)s); }
+                    i++;
+                    continue;
+                }
+                Effect first = (Effect)s;
+                List<Effect> run = new List<Effect>();
+                while (i < _strokes.Count && _strokes[i] is Effect)
+                {
+                    Effect e = (Effect)_strokes[i];
+                    if (e.Kind != first.Kind || e.Strength != first.Strength) { break; }
+                    run.Add(e);
+                    i++;
+                }
+                ApplyEffectRunFull(result, run);
+            }
+        }
+
+        private static void ApplyEffectRunFull(Bitmap result, List<Effect> run)
         {
             int w = result.Width, h = result.Height;
-            Dictionary<int, List<Effect>> groups = new Dictionary<int, List<Effect>>();
-            List<int> order = new List<int>();
-            for (int i = 0; i < _effects.Count; i++)
+            Bitmap mask = BuildMaskFull(run, w, h);
+            if (run[0].Kind == EffectErase)
             {
-                Effect e = _effects[i];
-                int key = e.Kind * 1000 + e.Strength;
-                List<Effect> list;
-                if (!groups.TryGetValue(key, out list))
-                {
-                    list = new List<Effect>();
-                    groups[key] = list;
-                    order.Add(key);
-                }
-                list.Add(e);
+                ApplyMasked(result, new Rectangle(0, 0, w, h), mask, null, true);
             }
-
-            for (int i = 0; i < order.Count; i++)
+            else
             {
-                List<Effect> strokes = groups[order[i]];
-                Bitmap mask = BuildMaskFull(strokes, w, h);
-                if (strokes[0].Kind == EffectErase)
-                {
-                    ApplyMasked(result, new Rectangle(0, 0, w, h), mask, null, true);
-                }
-                else
-                {
-                    Bitmap processed = Process(result, strokes[0].Kind, strokes[0].Strength, 1f);
-                    ApplyMasked(result, new Rectangle(0, 0, w, h), mask, processed, false);
-                    processed.Dispose();
-                }
-                mask.Dispose();
+                Bitmap processed = Process(result, run[0].Kind, run[0].Strength, 1f);
+                ApplyMasked(result, new Rectangle(0, 0, w, h), mask, processed, false);
+                processed.Dispose();
             }
+            mask.Dispose();
         }
 
         private static Bitmap BuildMaskFull(List<Effect> strokes, int w, int h)
@@ -1135,7 +1252,7 @@ namespace ImageToolbox
                 {
                     Effect e = strokes[i];
                     float r = Math.Max(1f, e.Width / 2f);
-                    using (Bitmap stamp = CreateStamp((int)Math.Round(r * 2)))
+                    using (Bitmap stamp = CreateStamp((int)Math.Round(r * 2), e.Opacity))
                     {
                         PointF prev = new PointF(e.Points[0].X, e.Points[0].Y);
                         g.DrawImage(stamp, prev.X - r, prev.Y - r, r * 2f, r * 2f);

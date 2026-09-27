@@ -25,6 +25,13 @@ namespace ImageToolbox
             get { return false; }
         }
 
+        // true 表示每次变化立刻同步刷新预览（不等节流计时器）。用于「预览本身就是主要反馈」的
+        // 操作（画笔）：画布重绘时显示图已是新的，笔迹紧贴鼠标；变换拖动仍走节流避免打满 UI 线程。
+        public virtual bool ImmediatePreview
+        {
+            get { return false; }
+        }
+
         public virtual bool WantsEntrySnapshot
         {
             get { return false; }
@@ -35,6 +42,14 @@ namespace ImageToolbox
         public virtual bool ReusablePreview
         {
             get { return false; }
+        }
+
+        // 若上一次 RenderPreview 返回的位图相对上一帧只有 rect（预览坐标）区域变化，
+        // 返回 true，编辑器只重合成该区域；默认 false 表示需要整图重合成。
+        public virtual bool TryGetPreviewDirtyRect(out Rectangle rect)
+        {
+            rect = Rectangle.Empty;
+            return false;
         }
 
         // true 表示该操作作用于整张文档（裁剪/画布/证件照/切图等会改变尺寸），
@@ -130,6 +145,17 @@ namespace ImageToolbox
         // 并通过 OnCanvasDrag 派发起点/移动/结束，action 分别为 0/1/2）。
         public virtual bool WantsCanvasDrag { get { return false; } }
         public virtual void OnCanvasDrag(Point imagePoint, int action) { }
+
+        // ---- 交互式变换框（PS 风格，供“变换”等操作使用）----
+        // WantsTransformBox=true 时编辑器把画布叠加绘制与悬停光标交给该操作：
+        // 操作画带手柄的框，画布把鼠标拖动按图层坐标继续经 OnCanvasDrag 派发。
+        public virtual bool WantsTransformBox { get { return false; } }
+
+        // 在画布客户区绘制叠加层（图像之上）；layerToClient 把图层坐标映射到客户区坐标。
+        public virtual void PaintCanvasOverlay(Graphics g, Func<PointF, PointF> layerToClient) { }
+
+        // 鼠标悬停时按图层坐标返回光标；null 表示用默认光标。
+        public virtual Cursor TransformCursor(Point layerPoint) { return null; }
 
         // 垂直方向“压紧”布局（见 LayoutCompact）。在 DpiScaler 按设计坐标缩放前调用，
         // 所以 gap 用设计像素。

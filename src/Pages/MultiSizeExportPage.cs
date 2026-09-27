@@ -17,6 +17,7 @@ namespace ImageToolbox
         private int[] _sizeValues = { 16, 24, 32, 48, 64, 96, 128, 256, 512 };
         private ProgressBar _progress;
         private Label _status;
+        private bool _busy;
 
         public MultiSizeExportPage()
         {
@@ -240,7 +241,16 @@ namespace ImageToolbox
             {
                 return;
             }
-            string[] files = Directory.GetFiles(dialog.SelectedPath);
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(dialog.SelectedPath);
+            }
+            catch (Exception)
+            {
+                _status.Text = "无法读取该文件夹";
+                return;
+            }
             AddPaths(files);
         }
 
@@ -316,6 +326,10 @@ namespace ImageToolbox
 
         private void StartExport()
         {
+            if (_busy)
+            {
+                return;
+            }
             if (_files.Items.Count == 0)
             {
                 _status.Text = "请先添加文件";
@@ -348,12 +362,15 @@ namespace ImageToolbox
 
             int ok = 0;
             int fail = 0;
+            _busy = true;
             try
             {
                 for (int f = 0; f < files.Length; f++)
                 {
+                    // DoEvents 会派发点击/关窗消息，这里用 _busy 防重入，并在控件被释放时收手。
                     _status.Text = "处理中：" + Path.GetFileName(files[f]) + "（" + (f + 1) + "/" + files.Length + "）";
                     Application.DoEvents();
+                    if (IsDisposed) { break; }
 
                     Bitmap source = null;
                     List<Bitmap> icoImages = new List<Bitmap>();
@@ -406,13 +423,21 @@ namespace ImageToolbox
 
                     _progress.Value = f + 1;
                     Application.DoEvents();
+                    if (IsDisposed) { break; }
                 }
 
-                _status.Text = "完成：成功 " + ok + " 个，失败 " + fail + " 个";
+                if (!IsDisposed)
+                {
+                    _status.Text = "完成：成功 " + ok + " 个，失败 " + fail + " 个";
+                }
             }
             finally
             {
-                this.Cursor = previous;
+                _busy = false;
+                if (!IsDisposed)
+                {
+                    this.Cursor = previous;
+                }
             }
         }
     }

@@ -25,6 +25,8 @@ namespace ImageToolbox
         private Button _resetButton;
         private Label _status;
         private Timer _previewTimer;
+        private Timer _liveTimer;
+        private bool _livePending;
 
         private int _active = -1;
         private string _sourcePath;
@@ -35,6 +37,8 @@ namespace ImageToolbox
         private Bitmap _shownPreview;
         private Bitmap _displayImage;
         private Bitmap _entrySnapshot;
+        private Bitmap _composeBuffer;   // 单图编辑：多图层预览的复用合成缓冲（避免每帧新建整图）
+        private bool _composeValid;      // 缓冲当前是否对应当前状态（否则下一帧整图重合成）
 
         private bool _opDirty;
         private bool _suppressDirty;
@@ -91,6 +95,7 @@ namespace ImageToolbox
                 _ops[i].DisposeResources();
             }
             if (_shownPreview != null) { _shownPreview.Dispose(); _shownPreview = null; }
+            if (_composeBuffer != null) { _composeBuffer.Dispose(); _composeBuffer = null; }
             if (_ownPreviewSource && _previewSource != null) { _previewSource.Dispose(); }
             _previewSource = null;
             if (_ownOpSource && _opSource != null) { _opSource.Dispose(); }
@@ -236,6 +241,12 @@ namespace ImageToolbox
             _previewTimer = new Timer();
             _previewTimer.Interval = 120;
             _previewTimer.Tick += delegate { _previewTimer.Stop(); ComputePreview(); };
+
+            // 实时操作（画笔/变换）的节流器：把同一帧内的多次失效合并成一次预览，
+            // 避免高频鼠标事件每来一个就整图重算+重绘，把 UI 线程压满而卡顿。
+            _liveTimer = new Timer();
+            _liveTimer.Interval = 15;
+            _liveTimer.Tick += delegate { _liveTimer.Stop(); _livePending = false; ComputePreview(); };
 
             UpdateButtons();
 
@@ -464,11 +475,31 @@ namespace ImageToolbox
                         _canvas.Selection = Rectangle.Empty;
                         _canvas.DragEnabled = true;
                     }
+                    // 交互式变换框：把叠加绘制与悬停光标交给当前操作。
+                    _canvas.OverlayPainter = null;
+                    _canvas.CursorProvider = null;
+                    if (_ops[_active].WantsTransformBox)
+                    {
+                        _canvas.OverlayPainter = delegate(Graphics g)
+                        {
+                            if (_active >= 0 && _active < _ops.Length) { _ops[_active].PaintCanvasOverlay(g, LayerToClient); }
+                        };
+                        _canvas.CursorProvider = delegate(Point disp)
+                        {
+                            if (_active < 0 || _active >= _ops.Length) { return null; }
+                            return _ops[_active].TransformCursor(ToLayer(ToSession(disp)));
+                        };
+                    }
                     _previewTimer.Stop();
+                    _liveTimer.Stop();
+                    _livePending = false;
+                    _composeValid = false;
                     ComputePreview();
                 }
                 else
                 {
+                    _canvas.OverlayPainter = null;
+                    _canvas.CursorProvider = null;
                     _canvas.SetImage(null);
                 }
                 UpdateButtons();
@@ -542,7 +573,20 @@ namespace ImageToolbox
             _previewTimer.Stop();
             if (_active >= 0 && _active < _ops.Length && _ops[_active].LivePreview)
             {
-                ComputePreview();
+                if (_ops[_active].ImmediatePreview)
+                {
+                    _liveTimer.Stop();
+                    _livePending = false;
+                    ComputePreview();
+                    return;
+                }
+                // 节流（不是防抖）：计时器已在跑时忽略新的失效，但到期总会用最新状态重算一次，
+                // 因此连续拖动不会因为不断重置计时器而迟迟不刷新。
+                if (!_livePending)
+                {
+                    _livePending = true;
+                    _liveTimer.Start();
+                }
                 return;
             }
             _previewTimer.Start();
@@ -594,8 +638,8 @@ namespace ImageToolbox
                 else
                 {
                     Bitmap activePreview = (opPreview != null) ? opPreview : _previewSource;
-                    display = _session.CompositePreview(_session.ActiveIndex, activePreview, PreviewSize);
-                    ownDisplay = true;
+                    display = ComposeLayerPreview(activePreview);
+                    ownDisplay = false;
                     if (disposeOp)
                     {
                         opPreview.Dispose();
@@ -627,9 +671,34 @@ namespace ImageToolbox
             }
         }
 
+        // 多图层预览：把当前图层内容合成到复用的缓冲上（背景层已缓存）。
+        // 当前操作能报告「只有某块脏区变化」时只重合成该块，实时绘制每帧只处理笔触范围。
+        private Bitmap ComposeLayerPreview(Bitmap activePreview)
+        {
+            int w = activePreview.Width, h = activePreview.Height;
+            if (_composeBuffer == null || _composeBuffer.Width != w || _composeBuffer.Height != h)
+            {
+                if (_composeBuffer != null) { _composeBuffer.Dispose(); }
+                _composeBuffer = new Bitmap(w, h);
+                _composeValid = false;
+            }
+            Rectangle dirty;
+            bool opDirty = _ops[_active].TryGetPreviewDirtyRect(out dirty);
+            bool whole = !_composeValid || !opDirty;
+            if (!whole && dirty.IsEmpty)
+            {
+                return _composeBuffer;   // 本帧当前图层内容没有变化
+            }
+            _session.CompositePreviewOver(_composeBuffer, _session.ActiveIndex, activePreview, PreviewSize, dirty, whole);
+            _composeValid = true;
+            return _composeBuffer;
+        }
+
         private void OnLayersChanged()
         {
             _previewTimer.Stop();
+            _liveTimer.Stop();
+            _livePending = false;
             ReloadAll();
         }
 
@@ -679,6 +748,19 @@ namespace ImageToolbox
             EditLayer layer = _session.ActiveLayer;
             if (layer == null) { return sessionPoint; }
             return new Point(sessionPoint.X - layer.Offset.X, sessionPoint.Y - layer.Offset.Y);
+        }
+
+        // 图层坐标 -> 画布客户区坐标（供变换框叠加绘制）。
+        private PointF LayerToClient(PointF layerPoint)
+        {
+            float s = 1f / DisplayScale();
+            float ox = 0f, oy = 0f;
+            if (_active >= 0 && _active < _ops.Length && !_ops[_active].DocumentLevel)
+            {
+                EditLayer layer = _session.ActiveLayer;
+                if (layer != null) { ox = layer.Offset.X; oy = layer.Offset.Y; }
+            }
+            return _canvas.ImageToClient(new PointF((layerPoint.X + ox) * s, (layerPoint.Y + oy) * s));
         }
 
         private void DispatchClick(Point p)

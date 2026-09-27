@@ -87,9 +87,9 @@ namespace ImageToolbox
             Font = new Font("Microsoft YaHei UI", 9F);
             AllowDrop = true;
 
-            // 本页大量使用 Anchor 绝对布局：必须在添加子控件前把客户区设成设计尺寸，
-            // 否则 Anchor 会按默认的 150x150 记录边距，窗口一大控件就被拉伸/推到画外
-            // （如文件列表撑成 1800px、右侧选项面板跑到不可见处）。
+            // 设计基准客户区尺寸：所有子控件坐标都按约 990x700 设计。必须在 BuildUi 之前设定，
+            // 这样首次 OnLayout 时 RelayoutBatch 才能按设计比例正确摆放（本页不用 Anchor，
+            // 每次布局都按当前 ClientSize 重排，见 RelayoutBatch）。
             ClientSize = new Size(990, 700);
 
             BuildUi();
