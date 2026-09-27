@@ -892,6 +892,12 @@ namespace ImageToolbox
                 return;
             }
 
+            // 有未应用的操作时先询问（是=应用后保存 / 否=不应用直接保存 / 取消=不保存）。
+            if (!ResolvePendingEdits())
+            {
+                return;
+            }
+
             string dir = string.IsNullOrEmpty(_sourcePath) ? null : Path.GetDirectoryName(_sourcePath);
             string name = string.IsNullOrEmpty(_sourcePath)
                 ? "编辑结果.png"
