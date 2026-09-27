@@ -94,6 +94,7 @@ namespace ImageToolbox
         public void Detach()
         {
             OnDeactivate();
+            OnDetach();
             Source = null;
             PreviewSource = null;
             Canvas = null;
@@ -155,6 +156,9 @@ namespace ImageToolbox
 
         protected virtual void OnActivate() { }
         protected virtual void OnDeactivate() { }
+        // 仅在编辑器真正切走该操作（Detach）时调用，用于释放只属于本次进入的临时状态；
+        // Attach（预览刷新/应用到图片）不会触发它。
+        protected virtual void OnDetach() { }
         public virtual Bitmap RenderPreview() { return null; }
         public virtual Bitmap BuildResult() { return null; }
 
@@ -162,6 +166,12 @@ namespace ImageToolbox
         public virtual void OnCanvasSelection(Rectangle imageRect) { }
         public virtual void OnBrushPoint(Point imagePoint, int action) { }
         public virtual int BrushRadiusSession { get { return 0; } }
+
+        // 鼠标在画布上移动（未按键）时按图层坐标派发，用于多边形套索的橡皮筋预览等。
+        public virtual void OnCanvasHover(Point layerPoint) { }
+
+        // 左键双击按图层坐标派发，用于多边形套索双击闭合。
+        public virtual void OnCanvasDoubleClick(Point layerPoint) { }
 
         // true 表示该操作需要在画布上按住左键拖动（编辑器会把画布切到拖动模式，
         // 并通过 OnCanvasDrag 派发起点/移动/结束，action 分别为 0/1/2）。

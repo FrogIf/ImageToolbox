@@ -55,6 +55,7 @@ namespace ImageToolbox
                 new DrawOp(),
                 new TransformOp(),
                 new MattingOp(),
+                new SelectionOp(),
                 new CropOp(),
                 new LocalOverlayOp(),
                 new ColorGradeOp(),
@@ -176,6 +177,8 @@ namespace ImageToolbox
             _canvas.DragStarted += delegate(Point p) { DispatchDrag(p, 0); };
             _canvas.DragMoved += delegate(Point p) { DispatchDrag(p, 1); };
             _canvas.DragFinished += delegate { DispatchDrag(Point.Empty, 2); };
+            _canvas.PointerMoved += delegate(Point p) { DispatchHover(p); };
+            _canvas.PointerDoubleClicked += delegate(Point p) { DispatchDoubleClick(p); };
             body.Controls.Add(_canvas, 1, 0);
 
             Panel right = new Panel();
@@ -235,7 +238,7 @@ namespace ImageToolbox
 
             string[] names =
             {
-                "图片信息", "绘画标注", "变换", "抠图", "裁剪 / 旋转",
+                "图片信息", "绘画标注", "变换", "抠图", "选区", "裁剪 / 旋转",
                 "局部覆盖", "调色", "局部调整", "风格预设", "特效", "取色配色",
                 "颜色工具", "证件照", "切图拼图", "图像对比"
             };
@@ -837,6 +840,17 @@ namespace ImageToolbox
             if (_active < 0 || _active >= _ops.Length) { return; }
             if (!_ops[_active].WantsCanvasDrag) { return; }
             _ops[_active].OnCanvasDrag(action == 2 ? Point.Empty : ToLayer(ToSession(p)), action);
+        }
+
+        // 鼠标悬停 / 双击：按图层空间派发给当前操作（如多边形套索）。
+        private void DispatchHover(Point p)
+        {
+            if (_active >= 0 && _active < _ops.Length) { _ops[_active].OnCanvasHover(ToLayer(ToSession(p))); }
+        }
+
+        private void DispatchDoubleClick(Point p)
+        {
+            if (_active >= 0 && _active < _ops.Length) { _ops[_active].OnCanvasDoubleClick(ToLayer(ToSession(p))); }
         }
 
         private bool ApplyActive()

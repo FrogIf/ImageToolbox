@@ -53,6 +53,8 @@ namespace ImageToolbox
         public event Action<Point> DragStarted;
         public event Action<Point> DragMoved;
         public event Action DragFinished;
+        public event Action<Point> PointerMoved;
+        public event Action<Point> PointerDoubleClicked;
         public event Action ViewChanged;
 
         // 叠加绘制（图像之上，客户区坐标）：编辑器转发给当前操作绘制变换框等。
@@ -70,7 +72,9 @@ namespace ImageToolbox
                 ControlStyles.OptimizedDoubleBuffer |
                 ControlStyles.UserPaint |
                 ControlStyles.ResizeRedraw |
-                ControlStyles.Selectable,
+                ControlStyles.Selectable |
+                ControlStyles.StandardClick |
+                ControlStyles.StandardDoubleClick,
                 true);
             TabStop = true;
             BackColor = Color.FromArgb(245, 245, 245);
@@ -768,6 +772,10 @@ namespace ImageToolbox
             _hoverClient = e.Location;
             _hoverPoint = _dragEnabled ? ControlToImageRaw(e.Location) : ControlToImage(e.Location);
             ApplyHoverCursor();
+            if (PointerMoved != null)
+            {
+                PointerMoved(_hoverPoint);
+            }
 
             if (_editingSelection)
             {
@@ -900,6 +908,16 @@ namespace ImageToolbox
         {
             base.OnMouseEnter(e);
             _mouseOver = true;
+        }
+
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            base.OnMouseDoubleClick(e);
+            if (_image == null || e.Button != MouseButtons.Left || PointerDoubleClicked == null)
+            {
+                return;
+            }
+            PointerDoubleClicked(_dragEnabled ? ControlToImageRaw(e.Location) : ControlToImage(e.Location));
         }
 
         protected override void OnMouseLeave(EventArgs e)
