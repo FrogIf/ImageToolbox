@@ -10,9 +10,9 @@ namespace ImageToolbox
 
         public MainForm()
         {
-            // 顶层窗体是唯一的 DPI 缩放起点；子 UserControl 用 Inherit 避免被缩放两次。
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
+            // 关闭 WinForms 自动缩放，改由 DpiScaler 按实际 DPI 手动缩放整棵控件树，
+            // 避免高 DPI 下“字体变大而控件尺寸不变”导致的裁切/重叠。
+            AutoScaleMode = AutoScaleMode.None;
             Text = "图片工具箱";
             ClientSize = new Size(1180, 760);
             MinimumSize = new Size(1000, 700);
@@ -38,6 +38,12 @@ namespace ImageToolbox
                 new BatchProcessPage(),
                 new MultiSizeExportPage()
             }));
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            DpiScaler.Apply(this, false);
         }
 
         public void AddTool(ToolPage tool)

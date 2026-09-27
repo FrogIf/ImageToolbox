@@ -831,9 +831,8 @@ namespace ImageToolbox
 
         public NewImageDialog()
         {
-            // 顶层对话框，自行按 DPI 缩放。
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
+            // 顶层对话框，自行按 DPI 缩放（与 MainForm 同样的手动缩放）。
+            AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Microsoft YaHei UI", 9F);
             Text = "新建图片";
             ClientSize = new Size(300, 158);
@@ -902,6 +901,12 @@ namespace ImageToolbox
 
             AcceptButton = ok;
             CancelButton = cancel;
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            DpiScaler.Apply(this, true);
         }
     }
 }

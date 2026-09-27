@@ -73,7 +73,7 @@ Sources live under `src/` (namespace is still flat `ImageToolbox`):
 
 - `app.manifest` is embedded via `/win32manifest` for DPI awareness and must stay wired into `build.ps1`. Without it, Windows bitmap-stretches the window and text is blurry at 125%/150% scaling.
 - `app.ico` is embedded via `/win32icon`; `MainForm` also sets its title-bar icon from `ExtractAssociatedIcon`. Regenerate the `.ico` with Pillow if needed.
-- Only the **top-level** windows set `AutoScaleDimensions = (96, 96); AutoScaleMode = AutoScaleMode.Dpi` (that's `MainForm`, and the standalone `NewImageDialog`). Child `UserControl`s (`SingleEditPage`, `ToolHostPage`, `BatchProcessPage`, `MultiSizeExportPage`, `EditOpPanel`, `LayerPanel`) use `AutoScaleMode.Inherit` (explicitly or by default) so the top-level window scales the whole tree exactly once — setting `Dpi` on a nested control scales its contents a second time and mangles the layout at 150%/200%.
+- All controls use `AutoScaleMode.None` (WinForms auto-scaling off). Instead `DpiScaler.Apply(root, scaleRootSize)` runs in `MainForm.OnLoad` (and `NewImageDialog.OnLoad`, with `scaleRootSize=true`): it reads the real DPI (`root.CreateGraphics().DpiX`) and, when ≠ 96, recursively multiplies every control's `Location`/`Size`/`Padding`/`Margin`/`MinimumSize`, docked thicknesses, and `TableLayoutPanel` absolute row/column styles by `dpi/96` — but **not** `Font` (a 9pt font already renders 2× at 200% DPI, so scaling it again would double). This is deterministic and avoids the WinForms `AutoScaleMode.Dpi` pitfalls (nested `UserControl`s double-scaling, or not scaling at all) that clipped/overlapped controls at 200%.
 
 ## Verification
 
