@@ -206,7 +206,8 @@ namespace ImageToolbox
             _layerPanel.Height = 318;
             _layerPanel.MinimumSize = new Size(0, 220);
             _layerPanel.LayersChanged += delegate { OnLayersChanged(); };
-            _layerPanel.PropsChanged += delegate { SchedulePreview(); };
+            // 图层属性（显示/混合模式/不透明度）变化会让背景合成失效，必须整图重合成。
+            _layerPanel.PropsChanged += delegate { _composeValid = false; SchedulePreview(); };
             right.Controls.Add(_layerPanel);
             _layerPanel.Bind(_session);
 
@@ -638,8 +639,19 @@ namespace ImageToolbox
                 else
                 {
                     Bitmap activePreview = (opPreview != null) ? opPreview : _previewSource;
-                    display = ComposeLayerPreview(activePreview);
-                    ownDisplay = false;
+                    if (_session.HasVisibleLayerAbove(_session.ActiveIndex))
+                    {
+                        // 当前图层不在最上层：快速合成路径会把当前图层画在最上面（顺序错误），
+                        // 必须按真实堆叠顺序整图合成。
+                        display = _session.CompositePreview(_session.ActiveIndex, activePreview, PreviewSize);
+                        ownDisplay = true;
+                        _composeValid = false;
+                    }
+                    else
+                    {
+                        display = ComposeLayerPreview(activePreview);
+                        ownDisplay = false;
+                    }
                     if (disposeOp)
                     {
                         opPreview.Dispose();

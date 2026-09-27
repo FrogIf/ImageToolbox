@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Windows.Forms;
 
@@ -13,7 +14,9 @@ namespace ImageToolbox
         private ComboBox _mode;
         private TrackBar _opacity;
         private Label _opacityV;
-        private CheckBox _visible;
+        private ContextMenuStrip _menu;
+        private ToolStripMenuItem _miVisible;
+        private ToolStripMenuItem _miRename;
         private Button _remove;
         private Button _up;
         private Button _down;
@@ -52,6 +55,20 @@ namespace ImageToolbox
             _list.Dock = DockStyle.Fill;
             _list.IntegralHeight = false;
             _list.SelectedIndexChanged += delegate { SelectLayer(); };
+            _list.MouseDown += ListMouseDown;
+            _list.DrawMode = DrawMode.OwnerDrawVariable;
+            _list.MeasureItem += delegate(object s, MeasureItemEventArgs e) { e.ItemHeight = _list.Font.Height + 7; };
+            _list.DrawItem += DrawLayerItem;
+
+            // 图层的显示/隐藏与重命名放在列表的右键菜单里。
+            _menu = new ContextMenuStrip();
+            _miVisible = new ToolStripMenuItem("隐藏图层", null, MenuToggleVisible);
+            _miRename = new ToolStripMenuItem("重命名…", null, MenuRename);
+            _menu.Items.Add(_miVisible);
+            _menu.Items.Add(new ToolStripSeparator());
+            _menu.Items.Add(_miRename);
+            _menu.Opening += delegate { UpdateMenuText(); };
+            _list.ContextMenuStrip = _menu;
 
             Panel titleBar = new Panel();
             titleBar.Dock = DockStyle.Top;
@@ -81,23 +98,16 @@ namespace ImageToolbox
             top.Controls.Add(bar);
             top.Controls.Add(titleBar);
 
-            _visible = new CheckBox();
-            _visible.Text = "显示";
-            _visible.Location = new Point(2, 3);
-            _visible.AutoSize = true;
-            _visible.CheckedChanged += delegate { ToggleVisible(); };
-            bottom.Controls.Add(_visible);
-
             Label modeCaption = new Label();
             modeCaption.Text = "混合模式";
-            modeCaption.Location = new Point(78, 6);
+            modeCaption.Location = new Point(2, 6);
             modeCaption.AutoSize = true;
             bottom.Controls.Add(modeCaption);
 
             _mode = new ComboBox();
             _mode.DropDownStyle = ComboBoxStyle.DropDownList;
-            _mode.Location = new Point(136, 3);
-            _mode.Size = new Size(144, 22);
+            _mode.Location = new Point(62, 3);
+            _mode.Size = new Size(172, 22);
             for (int i = 0; i < ImageBlend.ModeNames.Length; i++)
             {
                 _mode.Items.Add(ImageBlend.ModeNames[i]);
@@ -129,7 +139,7 @@ namespace ImageToolbox
             bottom.Controls.Add(_opacityV);
 
             Label hint = new Label();
-            hint.Text = "操作作用于选中图层；画布显示所有图层的合成结果。\r\n拖动上方分隔条可调整本面板高度。";
+            hint.Text = "操作作用于选中图层；画布显示所有图层的合成结果。\r\n右键图层可显示/隐藏、重命名；拖动上方分隔条调整高度。";
             hint.Location = new Point(2, 56);
             hint.Size = new Size(280, 28);
             hint.ForeColor = Color.FromArgb(80, 80, 80);
@@ -200,15 +210,45 @@ namespace ImageToolbox
             Raise();
         }
 
-        private void ToggleVisible()
+        // 右键先选中光标下的图层，菜单命令再作用于当前图层。
+        private void ListMouseDown(object sender, MouseEventArgs e)
         {
-            if (_updating || _session == null) { return; }
+            if (e.Button != MouseButtons.Right || _updating || _session == null) { return; }
+            int i = _list.IndexFromPoint(e.Location);
+            if (i >= 0 && i != _list.SelectedIndex) { _list.SelectedIndex = i; }
+        }
+
+        private void UpdateMenuText()
+        {
+            EditLayer layer = (_session == null) ? null : _session.ActiveLayer;
+            bool has = layer != null;
+            _miVisible.Enabled = has;
+            _miRename.Enabled = has;
+            _miVisible.Text = (has && !layer.Visible) ? "显示图层" : "隐藏图层";
+        }
+
+        private void MenuToggleVisible(object sender, EventArgs e)
+        {
+            if (_session == null) { return; }
             EditLayer layer = _session.ActiveLayer;
             if (layer == null) { return; }
-            _session.SetVisible(layer, _visible.Checked);
+            _session.SetVisible(layer, !layer.Visible);
             UpdateRowText();
             UpdateButtons();
             RaiseProps();
+        }
+
+        private void MenuRename(object sender, EventArgs e)
+        {
+            if (_session == null) { return; }
+            EditLayer layer = _session.ActiveLayer;
+            if (layer == null) { return; }
+            string name = RenameLayerDialog.Prompt(this, layer.Name);
+            if (name == null) { return; }
+            name = name.Trim();
+            if (name.Length == 0) { return; }
+            _session.Rename(layer, name);
+            Sync();
         }
 
         private void ChangeMode()
@@ -258,7 +298,6 @@ namespace ImageToolbox
         {
             EditLayer layer = (_session == null) ? null : _session.ActiveLayer;
             bool has = layer != null;
-            _visible.Enabled = has;
             _mode.Enabled = has;
             _opacity.Enabled = has;
             if (!has)
@@ -267,7 +306,6 @@ namespace ImageToolbox
                 return;
             }
             _updating = true;
-            _visible.Checked = layer.Visible;
             _mode.SelectedIndex = (int)layer.Mode;
             _opacity.Value = (int)Math.Round(layer.Opacity * 100f);
             _updating = false;
@@ -302,13 +340,78 @@ namespace ImageToolbox
             _updating = true;
             _list.Items[k] = Format(layer);
             _updating = false;
+            // 文本里不含可见性，单靠 Items[k] 赋值在“显示/隐藏”时不变化、不会重绘，需强制刷新。
+            _list.Invalidate();
         }
 
+        // 列表自绘，这里的文本只用于无障碍/测试（名字 + 模式/不透明度）；显示状态用左侧方框表示。
         private static string Format(EditLayer layer)
         {
-            return (layer.Visible ? "● " : "○ ") + layer.Name +
-                "   [" + ImageBlend.ModeNames[(int)layer.Mode] + " " +
+            return layer.Name + "   [" + ImageBlend.ModeNames[(int)layer.Mode] + " " +
                 (int)Math.Round(layer.Opacity * 100f) + "%]";
+        }
+
+        // 自绘图层行：左侧是「可见性方框」（可见=蓝色勾选，隐藏=空框加斜杠），
+        // 隐藏图层名用灰色，选中行仍能清楚区分。
+        private void DrawLayerItem(object sender, DrawItemEventArgs e)
+        {
+            e.DrawBackground();
+            if (e.Index < 0 || _session == null || e.Index >= _session.Layers.Count)
+            {
+                return;
+            }
+            EditLayer layer = _session.Layers[_session.Layers.Count - 1 - e.Index];
+            bool selected = (e.State & DrawItemState.Selected) != 0;
+            bool visible = layer.Visible;
+            Rectangle b = e.Bounds;
+
+            int box = Math.Max(12, _list.Font.Height - 3);
+            int bx = b.Left + 4;
+            int by = b.Top + (b.Height - box) / 2;
+            Rectangle r = new Rectangle(bx, by, box, box);
+
+            Color line = selected ? SystemColors.HighlightText : Color.FromArgb(110, 110, 110);
+            Point[] checkPts = new Point[]
+            {
+                new Point(r.X + box / 4, r.Y + box / 2),
+                new Point(r.X + box * 2 / 5, r.Y + box * 3 / 4),
+                new Point(r.X + box * 4 / 5, r.Y + box / 4)
+            };
+            if (visible)
+            {
+                // 未选中：填充蓝色方框 + 白勾；选中（蓝底）：方框描边 + 勾，避免白底白勾看不见。
+                if (!selected)
+                {
+                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(0, 120, 215)))
+                    {
+                        e.Graphics.FillRectangle(fill, r.X + 1, r.Y + 1, r.Width - 1, r.Height - 1);
+                    }
+                }
+                using (Pen pen = new Pen(line)) { e.Graphics.DrawRectangle(pen, r); }
+                using (Pen check = new Pen(selected ? SystemColors.HighlightText : Color.White, Math.Max(1.5f, box / 6f)))
+                {
+                    check.StartCap = LineCap.Round;
+                    check.EndCap = LineCap.Round;
+                    e.Graphics.DrawLines(check, checkPts);
+                }
+            }
+            else
+            {
+                using (Pen pen = new Pen(line))
+                {
+                    e.Graphics.DrawRectangle(pen, r);
+                    e.Graphics.DrawLine(pen, r.X + 2, r.Bottom - 2, r.Right - 2, r.Y + 2);
+                }
+            }
+
+            Color textColor = selected ? SystemColors.HighlightText : (visible ? SystemColors.ControlText : SystemColors.GrayText);
+            Rectangle textRect = new Rectangle(r.Right + 6, b.Top, Math.Max(0, b.Right - r.Right - 8), b.Height);
+            TextRenderer.DrawText(e.Graphics, Format(layer), _list.Font, textRect, textColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            if (selected)
+            {
+                e.DrawFocusRectangle();
+            }
         }
 
         private void Raise()
@@ -325,6 +428,70 @@ namespace ImageToolbox
             {
                 PropsChanged(this, EventArgs.Empty);
             }
+        }
+    }
+
+    // 图层重命名对话框（单行输入）。
+    internal class RenameLayerDialog : Form
+    {
+        private TextBox _box;
+
+        public static string Prompt(IWin32Window owner, string initial)
+        {
+            using (RenameLayerDialog dialog = new RenameLayerDialog(initial))
+            {
+                return dialog.ShowDialog(owner) == DialogResult.OK ? dialog._box.Text : null;
+            }
+        }
+
+        public RenameLayerDialog(string initial)
+        {
+            AutoScaleMode = AutoScaleMode.None;
+            Font = new Font("Microsoft YaHei UI", 9F);
+            Text = "重命名图层";
+            ClientSize = new Size(280, 96);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+
+            Label label = new Label();
+            label.Text = "图层名称：";
+            label.Location = new Point(14, 16);
+            label.AutoSize = true;
+            Controls.Add(label);
+
+            _box = new TextBox();
+            _box.Text = initial;
+            _box.Location = new Point(14, 40);
+            _box.Size = new Size(252, 22);
+            _box.SelectAll();
+            Controls.Add(_box);
+
+            Button ok = new Button();
+            ok.Text = "确定";
+            ok.Location = new Point(116, 70);
+            ok.Size = new Size(72, 22);
+            ok.DialogResult = DialogResult.OK;
+            Controls.Add(ok);
+
+            Button cancel = new Button();
+            cancel.Text = "取消";
+            cancel.Location = new Point(194, 70);
+            cancel.Size = new Size(72, 22);
+            cancel.DialogResult = DialogResult.Cancel;
+            Controls.Add(cancel);
+
+            AcceptButton = ok;
+            CancelButton = cancel;
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            DpiScaler.Apply(this, true);
+            _box.Focus();
         }
     }
 }

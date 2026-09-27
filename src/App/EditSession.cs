@@ -64,9 +64,21 @@ namespace ImageToolbox
                     count++;
                 }
                 EditLayer a = ActiveLayer;
-                return count == 1 && a != null && a.Offset == Point.Empty &&
+                return count == 1 && a != null && a.Visible && a.Image != null && a.Offset == Point.Empty &&
                     a.Mode == BlendMode.Normal && a.Opacity >= 1f;
             }
+        }
+
+        // 当前图层之上是否还有可见图层。编辑器只在「当前图层位于最上层」时走
+        // 复用的快速合成（该路径把当前图层画在最上面），否则必须按真实堆叠顺序整图合成。
+        public bool HasVisibleLayerAbove(int layerIndex)
+        {
+            for (int i = layerIndex + 1; i < _layers.Count; i++)
+            {
+                EditLayer l = _layers[i];
+                if (l.Visible && l.Opacity > 0f && l.Image != null) { return true; }
+            }
+            return false;
         }
 
         public void SetOriginal(Bitmap image)
@@ -432,7 +444,8 @@ namespace ImageToolbox
             Bitmap bg = BackgroundPreview(layerIndex, maxSize);
             Rectangle full = new Rectangle(0, 0, buffer.Width, buffer.Height);
             EditLayer a = ActiveLayer;
-            bool fastActive = a != null && a.Mode == BlendMode.Normal && a.Opacity >= 1f && a.Offset == Point.Empty;
+            bool activeVisible = a != null && a.Visible && a.Opacity > 0f;
+            bool fastActive = activeVisible && a.Mode == BlendMode.Normal && a.Opacity >= 1f && a.Offset == Point.Empty;
             bool hasBg = bg != null && bg.Width == buffer.Width && bg.Height == buffer.Height;
             bool useDirty = !whole && fastActive && hasBg && !dirty.IsEmpty;
 
@@ -450,7 +463,7 @@ namespace ImageToolbox
                 {
                     g.DrawImage(replacement, full);
                 }
-                else if (a != null)
+                else if (activeVisible)
                 {
                     // 非普通模式需逐像素且会写整图，先让出 Graphics。
                     g.ResetClip();
