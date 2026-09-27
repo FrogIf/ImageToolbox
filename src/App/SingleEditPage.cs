@@ -17,6 +17,7 @@ namespace ImageToolbox
         private LayerPanel _layerPanel;
         private ImageCanvas _canvas;
         private Button _openButton;
+        private Button _newButton;
         private Button _saveButton;
         private Button _applyButton;
         private Button _undoButton;
@@ -34,6 +35,10 @@ namespace ImageToolbox
         private Bitmap _shownPreview;
         private Bitmap _displayImage;
         private Bitmap _entrySnapshot;
+
+        private bool _opDirty;
+        private bool _suppressDirty;
+        private bool _switching;
 
         private bool _moveMode;
         private bool _moving;
@@ -117,24 +122,27 @@ namespace ImageToolbox
             _openButton = MakeButton(toolbar, "打开图片", 8, 90);
             _openButton.Click += delegate { OpenImage(); };
 
-            _saveButton = MakeButton(toolbar, "保存为 PNG", 102, 100);
+            _newButton = MakeButton(toolbar, "新建", 102, 62);
+            _newButton.Click += delegate { NewImage(); };
+
+            _saveButton = MakeButton(toolbar, "保存为 PNG", 168, 100);
             _saveButton.Click += delegate { SaveImage(); };
 
-            _applyButton = MakeButton(toolbar, "应用到图片", 208, 100);
+            _applyButton = MakeButton(toolbar, "应用到图片", 272, 100);
             _applyButton.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
             _applyButton.Click += delegate { ApplyActive(); };
 
-            _undoButton = MakeButton(toolbar, "撤销", 314, 62);
+            _undoButton = MakeButton(toolbar, "撤销", 376, 62);
             _undoButton.Click += delegate { _session.Undo(); ReloadAll(); _layerPanel.Sync(); };
 
-            _redoButton = MakeButton(toolbar, "重做", 380, 62);
+            _redoButton = MakeButton(toolbar, "重做", 442, 62);
             _redoButton.Click += delegate { _session.Redo(); ReloadAll(); _layerPanel.Sync(); };
 
-            _resetButton = MakeButton(toolbar, "复位", 446, 62);
+            _resetButton = MakeButton(toolbar, "复位", 508, 62);
             _resetButton.Click += delegate { _session.ResetToOriginal(); ReloadAll(); _layerPanel.Sync(); };
 
             _status = new Label();
-            _status.Location = new Point(520, 11);
+            _status.Location = new Point(582, 11);
             _status.Size = new Size(500, 22);
             _status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _status.Text = "打开一张图片，然后在左侧选择操作；调好后点「应用到图片」";
@@ -207,7 +215,7 @@ namespace ImageToolbox
             {
                 EditOpPanel op = _ops[i];
                 op.Visible = false;
-                op.PreviewInvalidated += delegate { SchedulePreview(); };
+                op.PreviewInvalidated += delegate { OnOpPreviewInvalidated(op); };
                 op.ApplyRequested += delegate
                 {
                     if (_ops[_active] == op) { ApplyActive(); }
@@ -290,6 +298,58 @@ namespace ImageToolbox
             _status.Text = "已载入：" + Path.GetFileName(_sourcePath) + "  （" + _session.Width + "x" + _session.Height + "）";
         }
 
+        private void NewImage()
+        {
+            int width, height;
+            Color background;
+            using (NewImageDialog dialog = new NewImageDialog())
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+                width = dialog.ImageWidth;
+                height = dialog.ImageHeight;
+                background = dialog.Background;
+            }
+
+            ApplyNewImage(width, height, background);
+        }
+
+        private void ApplyNewImage(int width, int height, Color background)
+        {
+            Cursor previous = this.Cursor;
+            this.Cursor = Cursors.WaitCursor;
+            try
+            {
+                Bitmap blank = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                using (Graphics g = Graphics.FromImage(blank))
+                {
+                    g.Clear(background);
+                }
+                ClearCanvasDisplay();
+                _sourcePath = null;
+                _session.SetOriginal(blank);
+                blank.Dispose();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "新建失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            finally
+            {
+                this.Cursor = previous;
+            }
+
+            CaptureEntrySnapshot();
+            ReloadAll();
+            _layerPanel.Sync();
+            _layerPanel.SetMoveMode(false);
+            _status.Text = "已新建：" + _session.Width + "x" + _session.Height +
+                (background.A == 0 ? "（透明背景）" : "（白色背景）");
+        }
+
         private void ClearCanvasDisplay()
         {
             _canvas.SetImage(null);
@@ -299,6 +359,7 @@ namespace ImageToolbox
                 _shownPreview = null;
             }
             _displayImage = null;
+            _opDirty = false;
         }
 
         private void CaptureEntrySnapshot()
@@ -326,11 +387,42 @@ namespace ImageToolbox
 
         private void OnOpSelected()
         {
+            if (_switching)
+            {
+                return;
+            }
             int index = _list.SelectedIndex;
             if (index == _active)
             {
                 return;
             }
+
+            // 当前操作有未应用的预览结果时，切换前先询问。
+            if (_active >= 0 && _active < _ops.Length && _opDirty && _ops[_active].CanApply)
+            {
+                string name = (_active < _list.Items.Count) ? _list.Items[_active].ToString() : "当前操作";
+                DialogResult answer = MessageBox.Show(this,
+                    "「" + name + "」的结果还没有应用到图片。\r\n是否先应用到图片？",
+                    "未应用的修改", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (answer == DialogResult.Cancel)
+                {
+                    _switching = true;
+                    _list.SelectedIndex = _active;
+                    _switching = false;
+                    return;
+                }
+                if (answer == DialogResult.Yes)
+                {
+                    ApplyActive();
+                }
+                else
+                {
+                    // 放弃未应用的修改：把当前操作恢复到中性状态。
+                    _ops[_active].ResetState();
+                    _opDirty = false;
+                }
+            }
+
             if (_active >= 0 && _active < _ops.Length)
             {
                 _ops[_active].Detach();
@@ -344,6 +436,7 @@ namespace ImageToolbox
             {
                 _ops[index].BringToFront();
             }
+            _opDirty = false;
             CaptureEntrySnapshot();
             ReloadAll();
         }
@@ -355,30 +448,38 @@ namespace ImageToolbox
                 UpdateButtons();
                 return;
             }
-            if (_session.HasImage)
+            _suppressDirty = true;
+            try
             {
-                RefreshPreviewSource();
-                for (int i = 0; i < _ops.Length; i++)
+                if (_session.HasImage)
                 {
-                    _ops[i].Visible = (i == _active);
+                    RefreshPreviewSource();
+                    for (int i = 0; i < _ops.Length; i++)
+                    {
+                        _ops[i].Visible = (i == _active);
+                    }
+                    _canvas.ReadOnly = true;
+                    _canvas.BrushEnabled = false;
+                    _canvas.LockAspect = 0f;
+                    _canvas.Selection = Rectangle.Empty;
+                    _ops[_active].Attach(_opSource, _previewSource, _canvas);
+                    if (_moveMode)
+                    {
+                        ApplyMoveCanvas();
+                    }
+                    _previewTimer.Stop();
+                    ComputePreview();
                 }
-                _canvas.ReadOnly = true;
-                _canvas.BrushEnabled = false;
-                _canvas.LockAspect = 0f;
-                _canvas.Selection = Rectangle.Empty;
-                _ops[_active].Attach(_opSource, _previewSource, _canvas);
-                if (_moveMode)
+                else
                 {
-                    ApplyMoveCanvas();
+                    _canvas.SetImage(null);
                 }
-                _previewTimer.Stop();
-                ComputePreview();
+                UpdateButtons();
             }
-            else
+            finally
             {
-                _canvas.SetImage(null);
+                _suppressDirty = false;
             }
-            UpdateButtons();
         }
 
         private void RefreshPreviewSource()
@@ -428,6 +529,15 @@ namespace ImageToolbox
                 _previewSource = _session.PreviewOf(layer, PreviewSize);
                 _ownPreviewSource = false;
             }
+        }
+
+        private void OnOpPreviewInvalidated(EditOpPanel op)
+        {
+            if (!_suppressDirty && _active >= 0 && _active < _ops.Length && op == _ops[_active])
+            {
+                _opDirty = true;
+            }
+            SchedulePreview();
         }
 
         private void SchedulePreview()
@@ -662,11 +772,11 @@ namespace ImageToolbox
             _layerPanel.Sync();
         }
 
-        private void ApplyActive()
+        private bool ApplyActive()
         {
             if (_active < 0 || _active >= _ops.Length || !_session.HasImage)
             {
-                return;
+                return false;
             }
 
             Cursor previous = this.Cursor;
@@ -677,7 +787,7 @@ namespace ImageToolbox
                 if (result == null)
                 {
                     _status.Text = "当前操作没有可应用的结果（如未取样/未框选，或为查看类）";
-                    return;
+                    return false;
                 }
                 if (_ops[_active].DocumentLevel)
                 {
@@ -688,13 +798,16 @@ namespace ImageToolbox
                     _session.CommitToActive(result);
                 }
                 _ops[_active].ResetState();
+                _opDirty = false;
                 ReloadAll();
                 _layerPanel.Sync();
                 _status.Text = "已应用  （当前 " + _session.Width + "x" + _session.Height + "）";
+                return true;
             }
             catch (Exception ex)
             {
                 MessageBox.Show(this, "应用失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
             }
             finally
             {
@@ -757,6 +870,93 @@ namespace ImageToolbox
             _resetButton.Enabled = has && _session.CanUndo;
             bool canApply = has && _active >= 0 && _active < _ops.Length && _ops[_active].CanApply;
             _applyButton.Enabled = canApply;
+        }
+    }
+
+    // 新建图片对话框：输入宽高并选择背景（白色 / 透明）。
+    internal class NewImageDialog : Form
+    {
+        private NumericUpDown _width;
+        private NumericUpDown _height;
+        private ComboBox _bg;
+
+        public int ImageWidth { get { return (int)_width.Value; } }
+        public int ImageHeight { get { return (int)_height.Value; } }
+        public Color Background
+        {
+            get { return (_bg.SelectedIndex == 1) ? Color.Transparent : Color.White; }
+        }
+
+        public NewImageDialog()
+        {
+            Text = "新建图片";
+            ClientSize = new Size(300, 158);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            Font = new Font("Microsoft YaHei UI", 9F);
+
+            Label wl = new Label();
+            wl.Text = "宽度 (px)";
+            wl.Location = new Point(16, 22);
+            wl.AutoSize = true;
+            Controls.Add(wl);
+
+            _width = new NumericUpDown();
+            _width.Location = new Point(110, 18);
+            _width.Size = new Size(160, 24);
+            _width.Minimum = 1;
+            _width.Maximum = 20000;
+            _width.Value = 1920;
+            Controls.Add(_width);
+
+            Label hl = new Label();
+            hl.Text = "高度 (px)";
+            hl.Location = new Point(16, 56);
+            hl.AutoSize = true;
+            Controls.Add(hl);
+
+            _height = new NumericUpDown();
+            _height.Location = new Point(110, 52);
+            _height.Size = new Size(160, 24);
+            _height.Minimum = 1;
+            _height.Maximum = 20000;
+            _height.Value = 1080;
+            Controls.Add(_height);
+
+            Label bl = new Label();
+            bl.Text = "背景";
+            bl.Location = new Point(16, 90);
+            bl.AutoSize = true;
+            Controls.Add(bl);
+
+            _bg = new ComboBox();
+            _bg.DropDownStyle = ComboBoxStyle.DropDownList;
+            _bg.Location = new Point(110, 86);
+            _bg.Size = new Size(160, 24);
+            _bg.Items.Add("白色");
+            _bg.Items.Add("透明");
+            _bg.SelectedIndex = 0;
+            Controls.Add(_bg);
+
+            Button ok = new Button();
+            ok.Text = "确定";
+            ok.Location = new Point(110, 120);
+            ok.Size = new Size(76, 28);
+            ok.DialogResult = DialogResult.OK;
+            Controls.Add(ok);
+
+            Button cancel = new Button();
+            cancel.Text = "取消";
+            cancel.Location = new Point(194, 120);
+            cancel.Size = new Size(76, 28);
+            cancel.DialogResult = DialogResult.Cancel;
+            Controls.Add(cancel);
+
+            AcceptButton = ok;
+            CancelButton = cancel;
         }
     }
 }
