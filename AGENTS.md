@@ -73,7 +73,7 @@ Sources live under `src/` (namespace is still flat `ImageToolbox`):
 
 - `app.manifest` is embedded via `/win32manifest` for DPI awareness and must stay wired into `build.ps1`. Without it, Windows bitmap-stretches the window and text is blurry at 125%/150% scaling.
 - `app.ico` is embedded via `/win32icon`; `MainForm` also sets its title-bar icon from `ExtractAssociatedIcon`. Regenerate the `.ico` with Pillow if needed.
-- `MainForm` uses `AutoScaleMode.Dpi` with `AutoScaleDimensions = (96, 96)`.
+- Only the **top-level** windows set `AutoScaleDimensions = (96, 96); AutoScaleMode = AutoScaleMode.Dpi` (that's `MainForm`, and the standalone `NewImageDialog`). Child `UserControl`s (`SingleEditPage`, `ToolHostPage`, `BatchProcessPage`, `MultiSizeExportPage`, `EditOpPanel`, `LayerPanel`) use `AutoScaleMode.Inherit` (explicitly or by default) so the top-level window scales the whole tree exactly once — setting `Dpi` on a nested control scales its contents a second time and mangles the layout at 150%/200%.
 
 ## Verification
 

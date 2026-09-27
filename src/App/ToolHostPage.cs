@@ -16,10 +16,8 @@ namespace ImageToolbox
             _title = title;
             _tools = tools;
 
-            AutoScaleMode = AutoScaleMode.Dpi;
-            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Inherit;
             Font = new Font("Microsoft YaHei UI", 9F);
-            ClientSize = new Size(1120, 680);
 
             BuildUi();
         }

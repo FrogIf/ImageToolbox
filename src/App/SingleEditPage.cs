@@ -68,10 +68,10 @@ namespace ImageToolbox
                 new InfoOp()
             };
 
-            AutoScaleMode = AutoScaleMode.Dpi;
-            AutoScaleDimensions = new SizeF(96F, 96F);
+            // 作为 MainForm 的子控件：用 Inherit，由顶层窗体的 DPI 缩放统一处理，
+            // 自身再设 Dpi 会在高 DPI 下被缩放两次（布局错乱）。
+            AutoScaleMode = AutoScaleMode.Inherit;
             Font = new Font("Microsoft YaHei UI", 9F);
-            ClientSize = new Size(1180, 720);
 
             BuildUi();
         }
@@ -831,6 +831,10 @@ namespace ImageToolbox
 
         public NewImageDialog()
         {
+            // 顶层对话框，自行按 DPI 缩放。
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            Font = new Font("Microsoft YaHei UI", 9F);
             Text = "新建图片";
             ClientSize = new Size(300, 158);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -838,7 +842,6 @@ namespace ImageToolbox
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            Font = new Font("Microsoft YaHei UI", 9F);
 
             Label wl = new Label();
             wl.Text = "宽度 (px)";

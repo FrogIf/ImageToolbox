@@ -10,13 +10,14 @@ namespace ImageToolbox
 
         public MainForm()
         {
+            // 顶层窗体是唯一的 DPI 缩放起点；子 UserControl 用 Inherit 避免被缩放两次。
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
             Text = "图片工具箱";
             ClientSize = new Size(1180, 760);
             MinimumSize = new Size(1000, 700);
             StartPosition = FormStartPosition.CenterScreen;
             WindowState = FormWindowState.Maximized;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            AutoScaleDimensions = new SizeF(96F, 96F);
             Font = new Font("Microsoft YaHei UI", 9F);
             try
             {

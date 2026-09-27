@@ -76,10 +76,8 @@ namespace ImageToolbox
 
         public BatchProcessPage()
         {
-            AutoScaleMode = AutoScaleMode.Dpi;
-            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Inherit;
             Font = new Font("Microsoft YaHei UI", 9F);
-            ClientSize = new Size(990, 680);
             AllowDrop = true;
 
             BuildUi();
