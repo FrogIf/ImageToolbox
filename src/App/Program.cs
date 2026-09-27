@@ -14,6 +14,7 @@ namespace ImageToolbox
             ClientSize = new Size(1180, 760);
             MinimumSize = new Size(1000, 700);
             StartPosition = FormStartPosition.CenterScreen;
+            WindowState = FormWindowState.Maximized;
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96F, 96F);
             Font = new Font("Microsoft YaHei UI", 9F);
