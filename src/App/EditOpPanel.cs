@@ -124,6 +124,11 @@ namespace ImageToolbox
         public virtual void OnCanvasSelection(Rectangle imageRect) { }
         public virtual void OnBrushPoint(Point imagePoint, int action) { }
         public virtual int BrushRadiusSession { get { return 0; } }
+
+        // true 表示该操作需要在画布上按住左键拖动（编辑器会把画布切到拖动模式，
+        // 并通过 OnCanvasDrag 派发起点/移动/结束，action 分别为 0/1/2）。
+        public virtual bool WantsCanvasDrag { get { return false; } }
+        public virtual void OnCanvasDrag(Point imagePoint, int action) { }
     }
 
     public static class EditOpUi

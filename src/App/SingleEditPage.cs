@@ -40,12 +40,6 @@ namespace ImageToolbox
         private bool _suppressDirty;
         private bool _switching;
 
-        private bool _moveMode;
-        private bool _moving;
-        private EditLayer _moveLayer;
-        private Point _moveStart;
-        private Point _moveStartOffset;
-
         public SingleEditPage()
         {
             _ops = new EditOpPanel[]
@@ -61,6 +55,7 @@ namespace ImageToolbox
                 new StyleOp(),
                 new EffectsOp(),
                 new DrawOp(),
+                new TransformOp(),
                 new MattingOp(),
                 new CropOp(),
                 new CanvasOp(),
@@ -177,9 +172,9 @@ namespace ImageToolbox
             _canvas.BrushStarted += delegate(Point p) { DispatchBrush(p, 0); };
             _canvas.BrushMoved += delegate(Point p) { DispatchBrush(p, 1); };
             _canvas.BrushFinished += delegate { DispatchBrush(Point.Empty, 2); };
-            _canvas.DragStarted += delegate(Point p) { BeginMove(ToSession(p)); };
-            _canvas.DragMoved += delegate(Point p) { UpdateMove(ToSession(p)); };
-            _canvas.DragFinished += delegate { EndMove(); };
+            _canvas.DragStarted += delegate(Point p) { DispatchDrag(p, 0); };
+            _canvas.DragMoved += delegate(Point p) { DispatchDrag(p, 1); };
+            _canvas.DragFinished += delegate { DispatchDrag(Point.Empty, 2); };
             body.Controls.Add(_canvas, 1, 0);
 
             Panel right = new Panel();
@@ -207,7 +202,6 @@ namespace ImageToolbox
             _layerPanel.MinimumSize = new Size(0, 220);
             _layerPanel.LayersChanged += delegate { OnLayersChanged(); };
             _layerPanel.PropsChanged += delegate { SchedulePreview(); };
-            _layerPanel.MoveModeChanged += delegate(bool on) { SetMoveMode(on); };
             right.Controls.Add(_layerPanel);
             _layerPanel.Bind(_session);
 
@@ -230,7 +224,7 @@ namespace ImageToolbox
             string[] names =
             {
                 "基础调整", "色阶", "曲线", "白平衡", "HSL", "局部调整", "色调", "LUT",
-                "风格预设", "特效", "绘画标注", "抠图", "裁剪 / 旋转", "画布 / 校正",
+                "风格预设", "特效", "绘画标注", "变换", "抠图", "裁剪 / 旋转", "画布 / 校正",
                 "证件照", "切图拼图", "取色配色", "局部覆盖",
                 "颜色工具", "图像对比", "图片信息"
             };
@@ -294,7 +288,6 @@ namespace ImageToolbox
             CaptureEntrySnapshot();
             ReloadAll();
             _layerPanel.Sync();
-            _layerPanel.SetMoveMode(false);
             _status.Text = "已载入：" + Path.GetFileName(_sourcePath) + "  （" + _session.Width + "x" + _session.Height + "）";
         }
 
@@ -345,7 +338,6 @@ namespace ImageToolbox
             CaptureEntrySnapshot();
             ReloadAll();
             _layerPanel.Sync();
-            _layerPanel.SetMoveMode(false);
             _status.Text = "已新建：" + _session.Width + "x" + _session.Height +
                 (background.A == 0 ? "（透明背景）" : "（白色背景）");
         }
@@ -460,12 +452,17 @@ namespace ImageToolbox
                     }
                     _canvas.ReadOnly = true;
                     _canvas.BrushEnabled = false;
+                    _canvas.DragEnabled = false;
                     _canvas.LockAspect = 0f;
                     _canvas.Selection = Rectangle.Empty;
                     _ops[_active].Attach(_opSource, _previewSource, _canvas);
-                    if (_moveMode)
+                    if (_ops[_active].WantsCanvasDrag)
                     {
-                        ApplyMoveCanvas();
+                        _canvas.ReadOnly = false;
+                        _canvas.BrushEnabled = false;
+                        _canvas.LockAspect = 0f;
+                        _canvas.Selection = Rectangle.Empty;
+                        _canvas.DragEnabled = true;
                     }
                     _previewTimer.Stop();
                     ComputePreview();
@@ -709,67 +706,12 @@ namespace ImageToolbox
             if (_active >= 0) { _ops[_active].OnBrushPoint(action == 2 ? Point.Empty : ToLayer(ToSession(p)), action); }
         }
 
-        private void SetMoveMode(bool on)
+        // 画布拖动：派发给需要拖动的当前操作（如“变换”），坐标为图层空间。
+        private void DispatchDrag(Point p, int action)
         {
-            _moveMode = on;
-            _moving = false;
-            _moveLayer = null;
-            _moveStartOffset = Point.Empty;
-            if (on)
-            {
-                ApplyMoveCanvas();
-                _previewTimer.Stop();
-                ComputePreview();
-                _status.Text = "移动模式：在画布上按住拖动即可移动当前图层";
-            }
-            else
-            {
-                _canvas.DragEnabled = false;
-                ReloadAll();
-            }
-        }
-
-        private void ApplyMoveCanvas()
-        {
-            _canvas.ReadOnly = true;
-            _canvas.BrushEnabled = false;
-            _canvas.LockAspect = 0f;
-            _canvas.Selection = Rectangle.Empty;
-            _canvas.DragEnabled = true;
-        }
-
-        private void BeginMove(Point p)
-        {
-            if (!_moveMode || !_session.HasImage) { return; }
-            _moveLayer = _session.ActiveLayer;
-            if (_moveLayer == null) { return; }
-            _moveStart = p;
-            _moveStartOffset = _moveLayer.Offset;
-            _moving = true;
-        }
-
-        private void UpdateMove(Point p)
-        {
-            if (!_moving || _moveLayer == null) { return; }
-            int dx = p.X - _moveStart.X;
-            int dy = p.Y - _moveStart.Y;
-            _moveLayer.Offset = new Point(_moveStartOffset.X + dx, _moveStartOffset.Y + dy);
-            _previewTimer.Stop();
-            ComputePreview();
-        }
-
-        private void EndMove()
-        {
-            if (!_moving) { return; }
-            _moving = false;
-            if (_moveLayer != null && _moveLayer.Offset != _moveStartOffset)
-            {
-                _session.CommitOffset(_moveLayer, _moveStartOffset);
-                _status.Text = "已移动图层（内容不会丢失，移回即可复原）";
-            }
-            _moveStartOffset = Point.Empty;
-            ReloadAll();
-            _layerPanel.Sync();
+            if (_active < 0 || _active >= _ops.Length) { return; }
+            if (!_ops[_active].WantsCanvasDrag) { return; }
+            _ops[_active].OnCanvasDrag(action == 2 ? Point.Empty : ToLayer(ToSession(p)), action);
         }
 
         private bool ApplyActive()
