@@ -334,7 +334,7 @@ namespace ImageToolbox
         {
             EditOpUi.Title(this, "风格预设", 10);
             EditOpUi.Caption(this, "风格", 44);
-            _preset = EditOpUi.Combo(this, 64, Presets, 1);
+            _preset = EditOpUi.Combo(this, 64, Presets, 0);
             _preset.SelectedIndexChanged += delegate { RaisePreview(); };
             _strength = EditOpUi.Slider(this, "强度", 100, 0, 100, 100, out _strengthV);
             _strength.ValueChanged += delegate { _strengthV.Text = _strength.Value + "%"; RaisePreview(); };
@@ -345,6 +345,12 @@ namespace ImageToolbox
         {
             _preset.SelectedIndex = 0;
             _strength.Value = 100;
+        }
+
+        // 「原图」或强度为 0 时没有实际改动。
+        public override bool HasPendingResult
+        {
+            get { return ((string)_preset.SelectedItem) != "原图" && _strength.Value > 0; }
         }
 
         private ColorMatrix Matrix()
@@ -401,6 +407,12 @@ namespace ImageToolbox
         protected override void OnResetState()
         {
             _effect.SelectedIndex = 0;
+        }
+
+        // 效果为「无」时没有实际改动（编辑器据此显示整图合成预览，避免透明边缘白边）。
+        public override bool HasPendingResult
+        {
+            get { return _effect.SelectedIndex != 0; }
         }
 
         private void Configure()

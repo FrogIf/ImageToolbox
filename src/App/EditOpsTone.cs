@@ -168,6 +168,12 @@ namespace ImageToolbox
             _center = new PointF(0.5f, 0.5f);
         }
 
+        // 曝光/对比度/饱和度都为 0 时蒙版没有任何效果。
+        public override bool HasPendingResult
+        {
+            get { return _exposure.Value != 0 || _contrast.Value != 0 || _sat.Value != 0; }
+        }
+
         private TuningState State()
         {
             TuningState s = new TuningState();

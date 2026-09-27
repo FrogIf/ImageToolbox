@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -307,7 +308,19 @@ namespace ImageToolbox
             DrawChecker(g, _imageRect);
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.DrawImage(_image, _imageRect);
+            // 平铺翻转采样：缩放绘制时不让插值核采到图像外的“透明”像素，否则图像四周会
+            // 出现一圈半透明边（与棋盘格混出白边）。
+            using (ImageAttributes wrap = new ImageAttributes())
+            {
+                wrap.SetWrapMode(WrapMode.TileFlipXY);
+                PointF[] dst =
+                {
+                    new PointF(_imageRect.Left, _imageRect.Top),
+                    new PointF(_imageRect.Right, _imageRect.Top),
+                    new PointF(_imageRect.Left, _imageRect.Bottom)
+                };
+                g.DrawImage(_image, dst, new RectangleF(0f, 0f, _image.Width, _image.Height), GraphicsUnit.Pixel, wrap);
+            }
         }
 
         // 图像画在背景层：这样带 WS_EX_TRANSPARENT 的透明子控件（就地文字输入框）

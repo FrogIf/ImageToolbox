@@ -7,6 +7,17 @@ using System.Windows.Forms;
 
 namespace ImageToolbox
 {
+    // 图层变更事件参数：AddsLayer 标记本次变更是“新增图层”。
+    public class LayerChangingEventArgs : CancelEventArgs
+    {
+        public readonly bool AddsLayer;
+
+        public LayerChangingEventArgs(bool addsLayer)
+        {
+            AddsLayer = addsLayer;
+        }
+    }
+
     // 全局图层组件：编辑器的常驻面板，管理 EditSession 的图层栈。
     public class LayerPanel : UserControl
     {
@@ -27,7 +38,8 @@ namespace ImageToolbox
         public event EventHandler LayersChanged;
         public event EventHandler PropsChanged;
         // 切换/删除/新增等会改变当前图层之前触发；e.Cancel=true 表示取消该操作（留在原图层）。
-        public event CancelEventHandler ActiveLayerChanging;
+        // e.AddsLayer=true 表示该操作是“新增图层”，编辑器可据此保持旧交互（如绘画笔迹跟随新图层）。
+        public event EventHandler<LayerChangingEventArgs> ActiveLayerChanging;
 
         public LayerPanel()
         {
@@ -89,7 +101,7 @@ namespace ImageToolbox
             bar.WrapContents = true;
 
             MakeBar(bar, "添加图片", delegate { AddImages(); });
-            MakeBar(bar, "新建", delegate { Run(delegate { _session.AddBlankLayer("新图层"); }); });
+            MakeBar(bar, "新建", delegate { Run(delegate { _session.AddBlankLayer("新图层"); }, true); });
             MakeBar(bar, "复制", delegate { Run(delegate { _session.DuplicateActive(); }); });
             _remove = MakeBar(bar, "删除", delegate { Run(delegate { _session.RemoveActive(); }); });
             _up = MakeBar(bar, "上移", delegate { Run(delegate { _session.MoveActive(1); }); });
@@ -167,18 +179,23 @@ namespace ImageToolbox
 
         private void Run(Action action)
         {
+            Run(action, false);
+        }
+
+        private void Run(Action action, bool addsLayer)
+        {
             if (_session == null || !_session.HasImage) { return; }
-            if (!ConfirmLayerChange()) { return; }
+            if (!ConfirmLayerChange(addsLayer)) { return; }
             action();
             Sync();
             Raise();
         }
 
         // 询问编辑器当前操作是否有未应用的修改；返回 false 表示取消本次图层变更。
-        private bool ConfirmLayerChange()
+        private bool ConfirmLayerChange(bool addsLayer)
         {
             if (ActiveLayerChanging == null) { return true; }
-            CancelEventArgs e = new CancelEventArgs();
+            LayerChangingEventArgs e = new LayerChangingEventArgs(addsLayer);
             ActiveLayerChanging(this, e);
             return !e.Cancel;
         }
@@ -216,7 +233,7 @@ namespace ImageToolbox
             int index = _session.Layers.Count - 1 - k;
             if (index != _session.ActiveIndex)
             {
-                if (!ConfirmLayerChange())
+                if (!ConfirmLayerChange(false))
                 {
                     Sync();   // 恢复列表选中到当前图层
                     return;

@@ -206,8 +206,13 @@ namespace ImageToolbox
             _layerPanel.MinimumSize = new Size(0, 220);
             _layerPanel.LayersChanged += delegate { OnLayersChanged(); };
             // 切换/增删图层前，若当前操作有未应用的结果，先询问应用/放弃/取消。
-            _layerPanel.ActiveLayerChanging += delegate(object s, CancelEventArgs e)
+            _layerPanel.ActiveLayerChanging += delegate(object s, LayerChangingEventArgs e)
             {
+                // 绘画标注在新建图层时保持旧交互：未应用的笔迹自动跟随到新图层，不提示。
+                if (e.AddsLayer && _active >= 0 && _active < _ops.Length && _ops[_active].CarriesOverToAddedLayer)
+                {
+                    return;
+                }
                 e.Cancel = !ResolvePendingEdits();
             };
             // 图层属性（显示/混合模式/不透明度）变化会让背景合成失效，必须整图重合成。
@@ -662,8 +667,7 @@ namespace ImageToolbox
                     }
                     else
                     {
-                        display = _session.CompositePreview(_session.ActiveIndex, _previewSource, _previewSize);
-                        ownDisplay = true;
+                        display = FlatCompositePreview(out ownDisplay);
                     }
                 }
                 else if (_session.IsSoloNormalActive)
@@ -671,9 +675,21 @@ namespace ImageToolbox
                     display = (opPreview != null) ? opPreview : _previewSource;
                     ownDisplay = disposeOp;
                 }
+                else if (opPreview == null || !_ops[_active].HasPendingResult)
+                {
+                    // 该操作当前没有实际像素改动（例如变换处在 identity、调色各参数为默认）。
+                    // 画面就是整图合成：直接显示「整图按真实图层顺序合成后再缩小」，与盖印/导出
+                    // 完全一致；若走逐图层缩小再叠加，含透明图层（如贴入到新图层的内容）的边缘
+                    // 会混出一圈白边。
+                    if (opPreview != null && disposeOp)
+                    {
+                        opPreview.Dispose();
+                    }
+                    display = FlatCompositePreview(out ownDisplay);
+                }
                 else
                 {
-                    Bitmap activePreview = (opPreview != null) ? opPreview : _previewSource;
+                    Bitmap activePreview = opPreview;
                     if (_session.CanReuseComposite(_session.ActiveIndex))
                     {
                         display = ComposeLayerPreview(activePreview);
@@ -715,6 +731,22 @@ namespace ImageToolbox
             {
                 this.Cursor = previous;
             }
+        }
+
+        // 整图按真实图层顺序合成后缩小。用于「操作当前不修改像素」的预览（查看类操作、
+        // 变换在 identity 等）：结果与盖印可见图层 / 导出图片逐像素一致，含透明图层的边缘
+        // 不会像逐图层缩小再叠加那样和背景混出白边。own 表示返回的位图由调用方释放。
+        private Bitmap FlatCompositePreview(out bool own)
+        {
+            own = true;
+            Bitmap flatComposite = _session.Composite();
+            Bitmap scaled = ImageUtil.CreatePreview(flatComposite, _previewSize);
+            if (scaled == null)
+            {
+                return flatComposite;
+            }
+            flatComposite.Dispose();
+            return scaled;
         }
 
         // 多图层预览：把当前图层内容合成到复用的缓冲上（背景层已缓存）。

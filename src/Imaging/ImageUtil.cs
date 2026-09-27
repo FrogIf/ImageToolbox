@@ -40,11 +40,21 @@ namespace ImageToolbox
                 // （Bilinear 在大倍数缩小时会发虚/走样），代价是生成缩放图稍慢，但结果被缓存。
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                g.DrawImage(
-                    source,
-                    new Rectangle(0, 0, width, height),
-                    new Rectangle(0, 0, source.Width, source.Height),
-                    GraphicsUnit.Pixel);
+                // 平铺翻转采样：缩放时不让插值核采到源图外的“透明”像素，否则缩略图最外圈
+                // 会带一圈半透明边，画布上看起来就像图片多了一条白边。
+                using (ImageAttributes wrap = new ImageAttributes())
+                {
+                    wrap.SetWrapMode(WrapMode.TileFlipXY);
+                    g.DrawImage(
+                        source,
+                        new Rectangle(0, 0, width, height),
+                        0,
+                        0,
+                        source.Width,
+                        source.Height,
+                        GraphicsUnit.Pixel,
+                        wrap);
+                }
             }
             return small;
         }

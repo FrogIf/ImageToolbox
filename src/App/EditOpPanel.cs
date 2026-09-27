@@ -47,6 +47,13 @@ namespace ImageToolbox
             get { return false; }
         }
 
+        // true 表示“新建图层”时，当前未应用的编辑自动迁移到新图层，而不弹出应用/放弃提示。
+        // 绘画标注用它保持旧交互：正在绘制时新建图层，笔迹跟随到新图层继续。
+        public virtual bool CarriesOverToAddedLayer
+        {
+            get { return false; }
+        }
+
         // true 表示 RenderPreview 返回的位图仍由操作自己持有（如画笔的持久预览），
         // 编辑器直接显示、不负责释放，可省去每个预览点一次的整图拷贝。
         public virtual bool ReusablePreview

@@ -202,6 +202,19 @@ namespace ImageToolbox
             get { return true; }
         }
 
+        // 正在绘制时新建图层：未应用的笔迹自动迁移到新图层，不提示是否应用。
+        public override bool CarriesOverToAddedLayer
+        {
+            get { return true; }
+        }
+
+        // 没有已完成的笔画时不算“有未应用结果”，这样切换到本工具但还没画任何东西时，
+        // 编辑器直接显示整图合成预览（与盖印/导出一致），不会因为透明图层边缘混出白边。
+        public override bool HasPendingResult
+        {
+            get { return _strokes.Count > 0 || _current != null || _effect != null; }
+        }
+
         protected override void OnActivate()
         {
             if (Canvas != null)

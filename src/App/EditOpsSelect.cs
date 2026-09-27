@@ -702,7 +702,16 @@ namespace ImageToolbox
                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                     g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                     g.Clear(Color.Transparent);
-                    g.DrawImage(_clipboard, new Rectangle(0, 0, b.Width, b.Height));
+                    // 平铺翻转采样：缩放时不让插值核采到源图外的“透明”像素，
+                    // 否则贴入内容四周会多出一圈半透明白边。
+                    using (ImageAttributes wrap = new ImageAttributes())
+                    {
+                        wrap.SetWrapMode(WrapMode.TileFlipXY);
+                        g.DrawImage(_clipboard,
+                            new Rectangle(0, 0, b.Width, b.Height),
+                            0, 0, _clipboard.Width, _clipboard.Height,
+                            GraphicsUnit.Pixel, wrap);
+                    }
                 }
                 ApplyMaskToPiece(piece, b, mask);
                 using (Graphics g = Graphics.FromImage(result))

@@ -384,6 +384,16 @@ namespace ImageToolbox
             _tint.Value = 0;
         }
 
+        // 所有参数为默认值时没有实际改动。
+        public override bool HasPendingResult
+        {
+            get
+            {
+                return _bright.Value != 0 || _contrast.Value != 0 || _sat.Value != 100 ||
+                    _temp.Value != 0 || _tint.Value != 0;
+            }
+        }
+
         private void BrowseRef()
         {
             OpenFileDialog dialog = new OpenFileDialog();
