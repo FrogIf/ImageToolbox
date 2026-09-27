@@ -16,6 +16,8 @@ namespace ImageToolbox
         private ListBox _images;
         private List<Bitmap> _extra = new List<Bitmap>();
         private static readonly Color[] BgColors = { Color.White, Color.Black, Color.FromArgb(240, 240, 240), Color.Transparent };
+        // 应用/放弃后置为 true：预览回到当前文档，避免重复执行拼图配置。
+        private bool _neutral;
 
         public override bool DocumentLevel
         {
@@ -27,18 +29,18 @@ namespace ImageToolbox
             EditOpUi.Title(this, "切图拼图", 10);
             EditOpUi.Caption(this, "模式", 44);
             _mode = EditOpUi.Combo(this, 64, new string[] { "九宫格切图（导出）", "拼图（合成到当前图）" }, 0);
-            _mode.SelectedIndexChanged += delegate { UpdateMode(); RaisePreview(); };
+            _mode.SelectedIndexChanged += delegate { UpdateMode(); Change(); };
 
             _rows = EditOpUi.Slider(this, "行数", 100, 1, 10, 3, out _rowsV);
             _cols = EditOpUi.Slider(this, "列数", 136, 1, 10, 3, out _colsV);
-            _rows.ValueChanged += delegate { _rowsV.Text = _rows.Value.ToString(); RaisePreview(); };
-            _cols.ValueChanged += delegate { _colsV.Text = _cols.Value.ToString(); RaisePreview(); };
+            _rows.ValueChanged += delegate { _rowsV.Text = _rows.Value.ToString(); Change(); };
+            _cols.ValueChanged += delegate { _colsV.Text = _cols.Value.ToString(); Change(); };
 
             EditOpUi.Button(this, "选择输出目录并导出切图", 10, 178, 200, delegate { ExportSlices(); });
 
             EditOpUi.Caption(this, "拼图方向", 220);
             _direction = EditOpUi.Combo(this, 240, new string[] { "横向拼接", "纵向拼接", "网格" }, 0);
-            _direction.SelectedIndexChanged += delegate { RaisePreview(); };
+            _direction.SelectedIndexChanged += delegate { Change(); };
 
             _images = new ListBox();
             _images.Location = new Point(10, 276);
@@ -48,17 +50,17 @@ namespace ImageToolbox
 
             EditOpUi.Button(this, "添加图片", 10, 374, 90, delegate { AddImage(); });
             EditOpUi.Button(this, "移除", 106, 374, 70, delegate { RemoveImage(); });
-            EditOpUi.Button(this, "清空", 182, 374, 70, delegate { ClearImages(); });
+            EditOpUi.Button(this, "清空", 182, 374, 70, delegate { ClearImages(); Change(); });
 
             _spacing = EditOpUi.Slider(this, "间距", 412, 0, 80, 8, out _spacingV);
-            _spacing.ValueChanged += delegate { _spacingV.Text = _spacing.Value.ToString(); RaisePreview(); };
+            _spacing.ValueChanged += delegate { _spacingV.Text = _spacing.Value.ToString(); Change(); };
             _gridCols = EditOpUi.Slider(this, "网格列", 448, 1, 8, 2, out _gridColsV);
-            _gridCols.ValueChanged += delegate { _gridColsV.Text = _gridCols.Value.ToString(); RaisePreview(); };
+            _gridCols.ValueChanged += delegate { _gridColsV.Text = _gridCols.Value.ToString(); Change(); };
             _longEdge = EditOpUi.Slider(this, "长边", 484, 0, 4000, 0, out _longEdgeV);
-            _longEdge.ValueChanged += delegate { _longEdgeV.Text = _longEdge.Value == 0 ? "原样" : _longEdge.Value.ToString(); RaisePreview(); };
+            _longEdge.ValueChanged += delegate { _longEdgeV.Text = _longEdge.Value == 0 ? "原样" : _longEdge.Value.ToString(); Change(); };
             EditOpUi.Caption(this, "背景色", 520);
             _bgCombo = EditOpUi.Combo(this, 540, new string[] { "白色", "黑色", "浅灰", "透明" }, 0);
-            _bgCombo.SelectedIndexChanged += delegate { RaisePreview(); };
+            _bgCombo.SelectedIndexChanged += delegate { Change(); };
             EditOpUi.Note(this, "切图把当前图按行列切成多张并导出；拼图把当前图与所选图片合成。", 580, 48);
 
             UpdateMode();
@@ -68,6 +70,13 @@ namespace ImageToolbox
         {
             _rowsV.Text = _rows.Value.ToString();
             _colsV.Text = _cols.Value.ToString();
+        }
+
+        // 控件/图片变化：重新进入“有结果”状态并刷新预览。
+        private void Change()
+        {
+            _neutral = false;
+            RaisePreview();
         }
 
         public override bool CanApply
@@ -100,7 +109,7 @@ namespace ImageToolbox
             {
                 MessageBox.Show(this, "无法加载图片：" + ex.Message);
             }
-            RaisePreview();
+            Change();
         }
 
         private void RemoveImage()
@@ -110,7 +119,7 @@ namespace ImageToolbox
             _extra[i].Dispose();
             _extra.RemoveAt(i);
             _images.Items.RemoveAt(i);
-            RaisePreview();
+            Change();
         }
 
         private void ClearImages()
@@ -129,6 +138,7 @@ namespace ImageToolbox
         protected override void OnResetState()
         {
             ClearImages();
+            _neutral = true;
         }
 
         private void ExportSlices()
@@ -214,14 +224,14 @@ namespace ImageToolbox
 
         public override Bitmap RenderPreview()
         {
-            if (PreviewSource == null) { return null; }
+            if (PreviewSource == null || _neutral) { return null; }
             if (_mode.SelectedIndex == 0) { return SlicePreview(); }
             return BuildCollage(PreviewSource);
         }
 
         public override Bitmap BuildResult()
         {
-            if (Source == null || _mode.SelectedIndex != 1) { return null; }
+            if (Source == null || _mode.SelectedIndex != 1 || _neutral) { return null; }
             return BuildCollage(Source);
         }
     }

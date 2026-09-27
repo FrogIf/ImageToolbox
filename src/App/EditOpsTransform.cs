@@ -114,6 +114,12 @@ namespace ImageToolbox
             get { return true; }
         }
 
+        // 只在确实存在位移/缩放/旋转时才算“有未应用结果”，避免单击画布也触发提示。
+        public override bool HasPendingResult
+        {
+            get { return !IsIdentity(); }
+        }
+
         protected override void OnResetState()
         {
             Reset();
@@ -205,7 +211,8 @@ namespace ImageToolbox
                 _dragging = false;
                 _grab = -1;
                 UpdateOffsetLabel();
-                RaisePreview();
+                // 结束事件：仅在确有变换时刷新，避免单击画布把操作标记为“已修改”。
+                if (!IsIdentity()) { RaisePreview(); }
             }
         }
 

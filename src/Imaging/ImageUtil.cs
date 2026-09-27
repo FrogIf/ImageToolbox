@@ -36,9 +36,9 @@ namespace ImageToolbox
             Bitmap small = new Bitmap(width, height, PixelFormat.Format32bppArgb);
             using (Graphics g = Graphics.FromImage(small))
             {
-                // 预览缩略图：HighQualityBilinear 比 HighQualityBicubic 快约 1.6 倍，
-                // 画质差异在随后的画布缩放中几乎不可见。
-                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                // 预览缩略图：用 HighQualityBicubic 做大比例缩小时比 Bilinear 明显更清晰
+                // （Bilinear 在大倍数缩小时会发虚/走样），代价是生成缩放图稍慢，但结果被缓存。
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 g.DrawImage(
                     source,

@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
@@ -25,6 +26,8 @@ namespace ImageToolbox
 
         public event EventHandler LayersChanged;
         public event EventHandler PropsChanged;
+        // 切换/删除/新增等会改变当前图层之前触发；e.Cancel=true 表示取消该操作（留在原图层）。
+        public event CancelEventHandler ActiveLayerChanging;
 
         public LayerPanel()
         {
@@ -165,9 +168,19 @@ namespace ImageToolbox
         private void Run(Action action)
         {
             if (_session == null || !_session.HasImage) { return; }
+            if (!ConfirmLayerChange()) { return; }
             action();
             Sync();
             Raise();
+        }
+
+        // 询问编辑器当前操作是否有未应用的修改；返回 false 表示取消本次图层变更。
+        private bool ConfirmLayerChange()
+        {
+            if (ActiveLayerChanging == null) { return true; }
+            CancelEventArgs e = new CancelEventArgs();
+            ActiveLayerChanging(this, e);
+            return !e.Cancel;
         }
 
         private void AddImages()
@@ -203,10 +216,14 @@ namespace ImageToolbox
             int index = _session.Layers.Count - 1 - k;
             if (index != _session.ActiveIndex)
             {
+                if (!ConfirmLayerChange())
+                {
+                    Sync();   // 恢复列表选中到当前图层
+                    return;
+                }
                 _session.ActiveIndex = index;
             }
-            SyncProps();
-            UpdateButtons();
+            Sync();
             Raise();
         }
 

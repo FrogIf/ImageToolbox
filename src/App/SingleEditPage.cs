@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
@@ -8,7 +9,9 @@ namespace ImageToolbox
 {
     public class SingleEditPage : ToolPage
     {
-        private const int PreviewSize = 1000;
+        // 预览（画布显示用）的长边像素：至少 1000，并按画布尺寸自适应，
+        // 保证适应窗口显示时预览不会被放大而发糊；上限避免内存/CPU 过大。
+        private int _previewSize = 1000;
 
         private readonly EditSession _session = new EditSession();
         private readonly EditOpPanel[] _ops;
@@ -53,7 +56,6 @@ namespace ImageToolbox
                 new TransformOp(),
                 new MattingOp(),
                 new CropOp(),
-                new CanvasOp(),
                 new LocalOverlayOp(),
                 new BasicAdjustOp(),
                 new LevelsOp(),
@@ -206,6 +208,11 @@ namespace ImageToolbox
             _layerPanel.Height = 318;
             _layerPanel.MinimumSize = new Size(0, 220);
             _layerPanel.LayersChanged += delegate { OnLayersChanged(); };
+            // 切换/增删图层前，若当前操作有未应用的结果，先询问应用/放弃/取消。
+            _layerPanel.ActiveLayerChanging += delegate(object s, CancelEventArgs e)
+            {
+                e.Cancel = !ResolvePendingEdits();
+            };
             // 图层属性（显示/混合模式/不透明度）变化会让背景合成失效，必须整图重合成。
             _layerPanel.PropsChanged += delegate { _composeValid = false; SchedulePreview(); };
             right.Controls.Add(_layerPanel);
@@ -229,7 +236,7 @@ namespace ImageToolbox
 
             string[] names =
             {
-                "图片信息", "绘画标注", "变换", "抠图", "裁剪 / 旋转", "画布 / 校正",
+                "图片信息", "绘画标注", "变换", "抠图", "裁剪 / 旋转",
                 "局部覆盖", "画面调节", "色阶", "曲线", "白平衡", "HSL", "局部调整",
                 "色调", "LUT", "风格预设", "特效", "取色配色", "颜色工具", "证件照",
                 "切图拼图", "图像对比"
@@ -389,6 +396,36 @@ namespace ImageToolbox
             _status.Text = "已重置到进入该操作时的图片状态";
         }
 
+        // 当前操作有未应用的修改时询问：应用 / 放弃 / 取消。
+        // 返回 false 表示用户选择取消（应停留在原状态）。
+        private bool ResolvePendingEdits()
+        {
+            if (_active < 0 || _active >= _ops.Length || !_opDirty || !_ops[_active].CanApply ||
+                !_ops[_active].HasPendingResult)
+            {
+                return true;
+            }
+            string name = (_active < _list.Items.Count) ? _list.Items[_active].ToString() : "当前操作";
+            DialogResult answer = MessageBox.Show(this,
+                "「" + name + "」的结果还没有应用到图片。\r\n是否先应用到图片？",
+                "未应用的修改", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (answer == DialogResult.Cancel)
+            {
+                return false;
+            }
+            if (answer == DialogResult.Yes)
+            {
+                ApplyActive();
+            }
+            else
+            {
+                // 放弃未应用的修改：把当前操作恢复到中性状态。
+                _ops[_active].ResetState();
+                _opDirty = false;
+            }
+            return true;
+        }
+
         private void OnOpSelected()
         {
             if (_switching)
@@ -402,29 +439,12 @@ namespace ImageToolbox
             }
 
             // 当前操作有未应用的预览结果时，切换前先询问。
-            if (_active >= 0 && _active < _ops.Length && _opDirty && _ops[_active].CanApply)
+            if (!ResolvePendingEdits())
             {
-                string name = (_active < _list.Items.Count) ? _list.Items[_active].ToString() : "当前操作";
-                DialogResult answer = MessageBox.Show(this,
-                    "「" + name + "」的结果还没有应用到图片。\r\n是否先应用到图片？",
-                    "未应用的修改", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-                if (answer == DialogResult.Cancel)
-                {
-                    _switching = true;
-                    _list.SelectedIndex = _active;
-                    _switching = false;
-                    return;
-                }
-                if (answer == DialogResult.Yes)
-                {
-                    ApplyActive();
-                }
-                else
-                {
-                    // 放弃未应用的修改：把当前操作恢复到中性状态。
-                    _ops[_active].ResetState();
-                    _opDirty = false;
-                }
+                _switching = true;
+                _list.SelectedIndex = _active;
+                _switching = false;
+                return;
             }
 
             if (_active >= 0 && _active < _ops.Length)
@@ -511,6 +531,18 @@ namespace ImageToolbox
             }
         }
 
+        // 预览长边 = 画布可显示范围（适应窗口时长边不超过画布），限制在 [1000, 2000]，
+        // 这样适应窗口/1× 显示时预览不会被放大，画质接近原图查看器。
+        private void UpdatePreviewSize()
+        {
+            int w = _canvas.ClientSize.Width;
+            int h = _canvas.ClientSize.Height;
+            int s = Math.Max(w, h);
+            if (s < 1000) { s = 1000; }
+            if (s > 2000) { s = 2000; }
+            _previewSize = s;
+        }
+
         private void RefreshPreviewSource()
         {
             if (_ownPreviewSource && _previewSource != null)
@@ -530,6 +562,8 @@ namespace ImageToolbox
                 return;
             }
 
+            UpdatePreviewSize();
+
             if (_ops[_active].DocumentLevel)
             {
                 Bitmap full = _session.Composite();
@@ -539,7 +573,7 @@ namespace ImageToolbox
                 {
                     return;
                 }
-                _previewSource = ImageUtil.CreatePreview(full, PreviewSize);
+                _previewSource = ImageUtil.CreatePreview(full, _previewSize);
                 _ownPreviewSource = _previewSource != null;
                 if (!_ownPreviewSource)
                 {
@@ -555,7 +589,7 @@ namespace ImageToolbox
                     return;
                 }
                 // 借用会话里按图层缓存的缩小图，避免每次刷新都重复缩放整图。
-                _previewSource = _session.PreviewOf(layer, PreviewSize);
+                _previewSource = _session.PreviewOf(layer, _previewSize);
                 _ownPreviewSource = false;
             }
         }
@@ -627,7 +661,7 @@ namespace ImageToolbox
                     }
                     else
                     {
-                        display = _session.CompositePreview(_session.ActiveIndex, _previewSource, PreviewSize);
+                        display = _session.CompositePreview(_session.ActiveIndex, _previewSource, _previewSize);
                         ownDisplay = true;
                     }
                 }
@@ -647,7 +681,7 @@ namespace ImageToolbox
                     else
                     {
                         // 当前图层上方有混合模式/半透明的图层：无法预合并，按真实堆叠顺序整图合成。
-                        display = _session.CompositePreview(_session.ActiveIndex, activePreview, PreviewSize);
+                        display = _session.CompositePreview(_session.ActiveIndex, activePreview, _previewSize);
                         ownDisplay = true;
                         _composeValid = false;
                     }
@@ -700,7 +734,7 @@ namespace ImageToolbox
             {
                 return _composeBuffer;   // 本帧当前图层内容没有变化
             }
-            _session.CompositePreviewOver(_composeBuffer, _session.ActiveIndex, activePreview, PreviewSize, dirty, whole);
+            _session.CompositePreviewOver(_composeBuffer, _session.ActiveIndex, activePreview, _previewSize, dirty, whole);
             _composeValid = true;
             return _composeBuffer;
         }

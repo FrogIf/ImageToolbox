@@ -20,6 +20,13 @@ namespace ImageToolbox
             get { return true; }
         }
 
+        // 当前操作是否真的产生了可应用的结果（用于“未应用修改”的提示判断）。
+        // 默认 true；对存在“中性/无操作”状态的操作可重写（如变换在 identity 时为 false）。
+        public virtual bool HasPendingResult
+        {
+            get { return true; }
+        }
+
         public virtual bool LivePreview
         {
             get { return false; }
@@ -52,7 +59,7 @@ namespace ImageToolbox
             return false;
         }
 
-        // true 表示该操作作用于整张文档（裁剪/画布/证件照/切图等会改变尺寸），
+        // true 表示该操作作用于整张文档（裁剪/证件照/切图等会改变尺寸），
         // 编辑器会把合成结果作为 Source，应用时替换整个文档而不是当前图层。
         public virtual bool DocumentLevel
         {

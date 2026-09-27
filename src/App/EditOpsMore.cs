@@ -222,36 +222,50 @@ namespace ImageToolbox
         private Label _countV;
         private CheckBox _cut;
         private static readonly Color[] BgColors = { Color.White, Color.FromArgb(67, 142, 219), Color.FromArgb(216, 0, 0), Color.FromArgb(30, 30, 30) };
+        // 应用到图片/放弃后置为 true：预览回到当前文档（不重复执行配置），改任一控件才重新生效。
+        private bool _neutral;
 
         public IdPhotoOp()
         {
             EditOpUi.Title(this, "证件照", 10);
             EditOpUi.Caption(this, "尺寸", 44);
             _size = EditOpUi.Combo(this, 64, Names, 0);
-            _size.SelectedIndexChanged += delegate { RaisePreview(); };
+            _size.SelectedIndexChanged += delegate { Change(); };
             EditOpUi.Caption(this, "模式", 100);
             _mode = EditOpUi.Combo(this, 120, new string[] { "裁剪填满", "完整留白" }, 0);
-            _mode.SelectedIndexChanged += delegate { RaisePreview(); };
+            _mode.SelectedIndexChanged += delegate { Change(); };
             EditOpUi.Caption(this, "背景色", 156);
             _bg = EditOpUi.Combo(this, 176, new string[] { "白色", "蓝色", "红色", "深灰" }, 0);
-            _bg.SelectedIndexChanged += delegate { RaisePreview(); };
+            _bg.SelectedIndexChanged += delegate { Change(); };
 
             EditOpUi.Caption(this, "输出", 212);
             _output = EditOpUi.Combo(this, 232, new string[] { "单张证件照", "排版到相纸" }, 0);
-            _output.SelectedIndexChanged += delegate { UpdateMode(); RaisePreview(); };
+            _output.SelectedIndexChanged += delegate { UpdateMode(); Change(); };
             EditOpUi.Caption(this, "相纸", 268);
             _paper = EditOpUi.Combo(this, 288, PaperNames, 1);
-            _paper.SelectedIndexChanged += delegate { RaisePreview(); };
+            _paper.SelectedIndexChanged += delegate { Change(); };
             _count = EditOpUi.Slider(this, "张数", 324, 0, 40, 0, out _countV);
-            _count.ValueChanged += delegate { _countV.Text = _count.Value == 0 ? "自动" : _count.Value.ToString(); RaisePreview(); };
+            _count.ValueChanged += delegate { _countV.Text = _count.Value == 0 ? "自动" : _count.Value.ToString(); Change(); };
             _cut = new CheckBox();
             _cut.Text = "加裁剪线";
             _cut.Location = new Point(10, 362);
             _cut.AutoSize = true;
-            _cut.CheckedChanged += delegate { RaisePreview(); };
+            _cut.CheckedChanged += delegate { Change(); };
             Controls.Add(_cut);
             EditOpUi.Note(this, "单张证件照会替换当前图；排版到相纸输出整张相纸。", 392, 48);
             UpdateMode();
+        }
+
+        // 控件变化：重新进入“有结果”状态并刷新预览。
+        private void Change()
+        {
+            _neutral = false;
+            RaisePreview();
+        }
+
+        protected override void OnResetState()
+        {
+            _neutral = true;
         }
 
         public override bool DocumentLevel
@@ -269,12 +283,32 @@ namespace ImageToolbox
             _countV.Text = _count.Value == 0 ? "自动" : _count.Value.ToString();
         }
 
-        private Bitmap Build(Bitmap baseImage)
+        // 单张证件照的预览按源图分辨率放大目标尺寸（保持长宽比），避免把 295×413 的小图
+        // 放大到画布显示而发糊；相纸排版本身尺寸足够大，按真实尺寸预览即可。
+        private float PreviewScale(int i)
+        {
+            int tw = Widths[i], th = Heights[i];
+            if (tw <= 0 || th <= 0 || PreviewSource == null) { return 1f; }
+            float k = Math.Min((float)PreviewSource.Width / tw, (float)PreviewSource.Height / th);
+            if (k < 1f) { k = 1f; }
+            return k;
+        }
+
+        private Bitmap Build(Bitmap baseImage, bool preview)
         {
             int i = Math.Max(0, _size.SelectedIndex);
             bool fill = _mode.SelectedIndex == 0;
             Color bg = BgColors[Math.Max(0, _bg.SelectedIndex)];
-            Bitmap photo = ImageLayout.BuildIdPhoto(baseImage, Widths[i], Heights[i], fill, bg);
+
+            int tw = Widths[i], th = Heights[i];
+            if (preview && _output.SelectedIndex == 0)
+            {
+                float k = PreviewScale(i);
+                tw = Math.Max(1, (int)Math.Round(tw * k));
+                th = Math.Max(1, (int)Math.Round(th * k));
+            }
+
+            Bitmap photo = ImageLayout.BuildIdPhoto(baseImage, tw, th, fill, bg);
             if (_output.SelectedIndex == 0)
             {
                 return photo;
@@ -287,14 +321,14 @@ namespace ImageToolbox
 
         public override Bitmap RenderPreview()
         {
-            if (PreviewSource == null) { return null; }
-            return Build(PreviewSource);
+            if (PreviewSource == null || _neutral) { return null; }
+            return Build(PreviewSource, true);
         }
 
         public override Bitmap BuildResult()
         {
-            if (Source == null) { return null; }
-            return Build(Source);
+            if (Source == null || _neutral) { return null; }
+            return Build(Source, false);
         }
     }
 
@@ -696,21 +730,82 @@ namespace ImageToolbox
         private TrackBar _param;
         private Label _paramV;
 
+        // 滑块对比的复用预览缓冲，拖动时只更新分界线两侧变化的窄条，避免每帧整图分配/重绘。
+        private Bitmap _sliderBuf;
+        private Bitmap _sliderScaledB;
+        private Bitmap _sliderA;
+        private Bitmap _sliderB;
+        private int _sliderSplit = -1;
+
         public CompareOp()
         {
             EditOpUi.Title(this, "图像对比", 10);
             EditOpUi.Button(this, "选择对比图 B", 10, 40, 120, delegate { BrowseB(); });
             EditOpUi.Caption(this, "方式", 80);
             _mode = EditOpUi.Combo(this, 100, new string[] { "左右并排", "上下并排", "滑块对比", "差异高亮" }, 0);
-            _mode.SelectedIndexChanged += delegate { RaisePreview(); };
+            _mode.SelectedIndexChanged += delegate { OnModeChanged(); };
             _param = EditOpUi.Slider(this, "参数", 136, 0, 400, 150, out _paramV);
             _param.ValueChanged += delegate { _paramV.Text = _param.Value.ToString(); RaisePreview(); };
-            EditOpUi.Note(this, "当前图作为 A，与所选 B 对比（查看用，不改变图片）。", 174, 48);
+            EditOpUi.Note(this, "当前图作为 A，与所选 B 对比（查看用，不改变图片）。滑块对比时可在图上按住左右拖动调节分界。", 174, 60);
         }
 
         public override bool CanApply
         {
             get { return false; }
+        }
+
+        // 滑块对比需要画布拖动来移动分界线。
+        public override bool WantsCanvasDrag
+        {
+            get { return true; }
+        }
+
+        // 让画布悬停光标由本操作决定（滑块对比时显示左右箭头）。
+        public override bool WantsTransformBox
+        {
+            get { return true; }
+        }
+
+        // 滑块对比拖动时即时刷新，拖动分界更跟手（其它模式维持原本的防抖）。
+        public override bool LivePreview
+        {
+            get { return _mode.SelectedIndex == 2; }
+        }
+
+        // 同步刷新（不等节流），且复用预览位图，让拖动分界线贴合指针。
+        public override bool ImmediatePreview
+        {
+            get { return _mode.SelectedIndex == 2; }
+        }
+
+        public override bool ReusablePreview
+        {
+            get { return _mode.SelectedIndex == 2; }
+        }
+
+        private void OnModeChanged()
+        {
+            // 滑块对比只用 0–100 的比例；参数越界时回到中间。
+            if (_mode.SelectedIndex == 2 && _param.Value > 100) { _param.Value = 50; }
+            RaisePreview();
+        }
+
+        public override Cursor TransformCursor(Point layerPoint)
+        {
+            return (_mode.SelectedIndex == 2) ? Cursors.SizeWE : null;
+        }
+
+        public override void OnCanvasDrag(Point imagePoint, int action)
+        {
+            if (action == 2) { return; }   // 结束事件坐标为 (0,0)，忽略
+            if (_mode.SelectedIndex != 2 || Source == null) { return; }
+            float ratio = (float)imagePoint.X / Source.Width;
+            if (ratio < 0f) { ratio = 0f; }
+            if (ratio > 1f) { ratio = 1f; }
+            int v = (int)Math.Round(ratio * 100f);
+            if (v < _param.Minimum) { v = _param.Minimum; }
+            if (v > _param.Maximum) { v = _param.Maximum; }
+            if (_param.Value != v) { _param.Value = v; }
         }
 
         protected override void OnActivate()
@@ -740,6 +835,16 @@ namespace ImageToolbox
         public override void DisposeResources()
         {
             if (_b != null) { _b.Dispose(); _b = null; }
+            DisposeSlider();
+        }
+
+        private void DisposeSlider()
+        {
+            if (_sliderBuf != null) { _sliderBuf.Dispose(); _sliderBuf = null; }
+            if (_sliderScaledB != null) { _sliderScaledB.Dispose(); _sliderScaledB = null; }
+            _sliderA = null;
+            _sliderB = null;
+            _sliderSplit = -1;
         }
 
         public override Bitmap RenderPreview()
@@ -748,9 +853,97 @@ namespace ImageToolbox
             switch (_mode.SelectedIndex)
             {
                 case 1: return ImageCompare.SideBySide(PreviewSource, _b, true, 8);
-                case 2: return ImageCompare.Slider(PreviewSource, _b, _param.Value / 100f);
+                case 2: return SliderPreview(_param.Value / 100f);
                 case 3: return ImageCompare.Difference(PreviewSource, _b, _param.Value / 100f);
                 default: return ImageCompare.SideBySide(PreviewSource, _b, false, 8);
+            }
+        }
+
+        // 复用的滑块预览：仅重绘分界线移动经过的窄条，拖动时开销极小。
+        private Bitmap SliderPreview(float ratio)
+        {
+            if (ratio < 0f) { ratio = 0f; }
+            if (ratio > 1f) { ratio = 1f; }
+            int w = PreviewSource.Width, h = PreviewSource.Height;
+
+            bool rebuild = _sliderBuf == null
+                || _sliderBuf.Width != w || _sliderBuf.Height != h
+                || !object.ReferenceEquals(_sliderA, PreviewSource)
+                || !object.ReferenceEquals(_sliderB, _b);
+            if (rebuild)
+            {
+                DisposeSlider();
+                _sliderBuf = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                _sliderScaledB = ImageCompare.Scale(_b, w, h);
+                using (Graphics g = Graphics.FromImage(_sliderBuf))
+                {
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    g.DrawImage(PreviewSource, new Rectangle(0, 0, w, h));
+                }
+                _sliderA = PreviewSource;
+                _sliderB = _b;
+                _sliderSplit = -1;
+            }
+
+            int split = (int)Math.Round(w * ratio);
+            if (_sliderSplit < 0)
+            {
+                // 首次：整幅重画（A 全图 + B 左侧）。
+                using (Graphics g = Graphics.FromImage(_sliderBuf))
+                {
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    DrawSplit(g, split, w, h, 0, w);
+                }
+            }
+            else if (split != _sliderSplit)
+            {
+                int lo = Math.Min(split, _sliderSplit) - 2;
+                int hi = Math.Max(split, _sliderSplit) + 3;
+                if (lo < 0) { lo = 0; }
+                if (hi > w) { hi = w; }
+                if (hi > lo)
+                {
+                    using (Graphics g = Graphics.FromImage(_sliderBuf))
+                    {
+                        g.CompositingMode = CompositingMode.SourceCopy;
+                        DrawSplit(g, split, w, h, lo, hi);
+                    }
+                }
+            }
+            _sliderSplit = split;
+
+            if (split > 0 && split < w)
+            {
+                using (Graphics g = Graphics.FromImage(_sliderBuf))
+                {
+                    g.CompositingMode = CompositingMode.SourceOver;
+                    using (Pen pen = new Pen(Color.FromArgb(255, 0, 174, 255), 2f))
+                    {
+                        g.DrawLine(pen, split, 0, split, h);
+                    }
+                }
+            }
+            return _sliderBuf;
+        }
+
+        // 在 [lo, hi] 范围内按 split 画出 A（右） / B（左）两段。
+        private void DrawSplit(Graphics g, int split, int w, int h, int lo, int hi)
+        {
+            int aStart = Math.Max(lo, split);
+            if (hi > aStart)
+            {
+                g.DrawImage(PreviewSource,
+                    new Rectangle(aStart, 0, hi - aStart, h),
+                    new Rectangle(aStart, 0, hi - aStart, h),
+                    GraphicsUnit.Pixel);
+            }
+            int bEnd = Math.Min(hi, split);
+            if (bEnd > lo)
+            {
+                g.DrawImage(_sliderScaledB,
+                    new Rectangle(lo, 0, bEnd - lo, h),
+                    new Rectangle(lo, 0, bEnd - lo, h),
+                    GraphicsUnit.Pixel);
             }
         }
     }
