@@ -11,34 +11,44 @@ namespace ImageToolbox
     // 右侧滑杆与手柄双向联动。放大或旋转超出画布的部分会被裁掉。
     public class TransformOp : EditOpPanel
     {
-        private TrackBar _scale, _angle;
-        private Label _scaleV, _angleV, _offset;
+        private TrackBar _scaleX, _scaleY, _angle;
+        private Label _scaleXV, _scaleYV, _angleV, _offset;
         private int _dx, _dy;
-        private int _grab = -1;              // 0..3 = 四角手柄；4 = 旋转柄；-1 = 移动
+        private int _grab = -1;              // 0..3 四角；4..7 四边中点；8 旋转柄；-1 移动
         private int _dragBaseX, _dragBaseY;
         private Point _dragStart;
         private float _baseAngle;
-        private PointF _anchor;              // 缩放时固定的对角点
+        private float _baseScaleX = 1f, _baseScaleY = 1f;  // 拖动起始时的缩放比
+        private PointF _anchor;              // 缩放时固定的对角/对边点
         private PointF _rotCenter;           // 旋转中心
         private double _grabAngle;           // 旋转开始时指针相对中心的角度
         private bool _syncing;               // 程序化同步滑杆时抑制重复预览
         private bool _dragging;
         private float _previewScale = 1f;
         private Bitmap _preview;             // 复用的预览位图（避免每帧分配整图）
+        private Rectangle _content;          // 源坐标下实际内容包围盒（去掉透明边）
+        private Bitmap _contentFor;          // _content 对应的 Source，用于缓存
 
         public TransformOp()
         {
             EditOpUi.Title(this, "变换", 10);
-            EditOpUi.Note(this, "画布上拖动移动图层；拖四角缩放（锚定对角）、拖顶部圆柄旋转。放大或旋转超出画布的部分会被裁掉。", 40, 66);
+            EditOpUi.Note(this, "画布上拖动移动图层；拖四角等比缩放（锚定对角）、拖四边中点单向拉伸、拖顶部圆柄旋转。放大或旋转超出画布的部分会被裁掉。", 40, 66);
 
-            _scale = EditOpUi.Slider(this, "缩放", 112, 10, 400, 100, out _scaleV);
-            _scale.ValueChanged += delegate
+            _scaleX = EditOpUi.Slider(this, "水平", 112, 10, 400, 100, out _scaleXV);
+            _scaleX.ValueChanged += delegate
             {
-                _scaleV.Text = _scale.Value + "%";
+                _scaleXV.Text = _scaleX.Value + "%";
                 if (!_syncing) { RaisePreview(); }
             };
 
-            _angle = EditOpUi.Slider(this, "旋转", 152, -180, 180, 0, out _angleV);
+            _scaleY = EditOpUi.Slider(this, "垂直", 142, 10, 400, 100, out _scaleYV);
+            _scaleY.ValueChanged += delegate
+            {
+                _scaleYV.Text = _scaleY.Value + "%";
+                if (!_syncing) { RaisePreview(); }
+            };
+
+            _angle = EditOpUi.Slider(this, "旋转", 182, -180, 180, 0, out _angleV);
             _angle.ValueChanged += delegate
             {
                 _angleV.Text = _angle.Value + "°";
@@ -46,13 +56,14 @@ namespace ImageToolbox
             };
 
             _offset = new Label();
-            _offset.Location = new Point(10, 192);
+            _offset.Location = new Point(10, 222);
             _offset.Size = new Size(250, 20);
             _offset.Text = "位移：0, 0";
             Controls.Add(_offset);
 
-            EditOpUi.Button(this, "重置", 10, 222, 80, delegate { Reset(); });
-            _scaleV.Text = "100%";
+            EditOpUi.Button(this, "重置", 10, 252, 80, delegate { Reset(); });
+            _scaleXV.Text = "100%";
+            _scaleYV.Text = "100%";
             _angleV.Text = "0°";
         }
 
@@ -64,6 +75,7 @@ namespace ImageToolbox
                 Canvas.BrushEnabled = false;
             }
             _previewScale = (PreviewSource != null && Source != null) ? (float)PreviewSource.Width / Source.Width : 1f;
+            EnsureContent();
             _dragging = false;
             _grab = -1;
             // 预览尺寸变了才重建复用缓冲。
@@ -114,7 +126,8 @@ namespace ImageToolbox
             _dragging = false;
             _grab = -1;
             _syncing = true;
-            _scale.Value = 100;
+            _scaleX.Value = 100;
+            _scaleY.Value = 100;
             _angle.Value = 0;
             _syncing = false;
             UpdateOffsetLabel();
@@ -128,7 +141,7 @@ namespace ImageToolbox
 
         private bool IsIdentity()
         {
-            return _dx == 0 && _dy == 0 && _scale.Value == 100 && _angle.Value == 0;
+            return _dx == 0 && _dy == 0 && _scaleX.Value == 100 && _scaleY.Value == 100 && _angle.Value == 0;
         }
 
         // ---- 画布交互 ----
@@ -143,11 +156,18 @@ namespace ImageToolbox
                 _dragBaseX = _dx;
                 _dragBaseY = _dy;
                 _baseAngle = _angle.Value;
-                if (_grab >= 0 && _grab < 4)
+                _baseScaleX = _scaleX.Value / 100f;
+                _baseScaleY = _scaleY.Value / 100f;
+                if (_grab >= 0 && _grab < 8)
                 {
-                    _anchor = QuadLayer()[(_grab + 2) % 4];
+                    PointF uo = U(AnchorIndex(_grab));
+                    double a = _baseAngle * Math.PI / 180.0;
+                    float cos = (float)Math.Cos(a), sin = (float)Math.Sin(a);
+                    float rxo = cos * (_baseScaleX * uo.X) - sin * (_baseScaleY * uo.Y);
+                    float ryo = sin * (_baseScaleX * uo.X) + cos * (_baseScaleY * uo.Y);
+                    _anchor = new PointF(PivotX() + _dx + rxo, PivotY() + _dy + ryo);
                 }
-                else if (_grab == 4)
+                else if (_grab == 8)
                 {
                     _rotCenter = Center();
                     _grabAngle = Math.Atan2(imagePoint.Y - _rotCenter.Y, imagePoint.X - _rotCenter.X);
@@ -164,11 +184,11 @@ namespace ImageToolbox
                     _dragBaseX = _dx;
                     _dragBaseY = _dy;
                 }
-                if (_grab >= 0 && _grab < 4)
+                if (_grab >= 0 && _grab < 8)
                 {
                     ApplyScaleDrag(imagePoint);
                 }
-                else if (_grab == 4)
+                else if (_grab == 8)
                 {
                     ApplyRotateDrag(imagePoint);
                 }
@@ -197,42 +217,70 @@ namespace ImageToolbox
             if (factor <= 0.0001f) { return -1; }
             float tol = 8f / factor;
             PointF[] q = QuadLayer();
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 8; i++)
             {
-                if (Distance(p, q[i]) <= tol) { return i; }
+                if (Distance(p, HandleLayer(i)) <= tol) { return i; }
             }
-            if (Distance(p, RotationHandle(q, factor)) <= tol) { return 4; }
+            if (Distance(p, RotationHandle(q, factor)) <= tol) { return 8; }
             return -1;
         }
 
-        // 拖角缩放：锚定对角不动，沿对角方向解出缩放比。
+        // 缩放拖动：锚定对角（四角）或对边（四边中点）不动。
+        // 四角等比缩放；四边中点只改变对应的 X / Y 方向，实现单向拉伸/压缩。
         private void ApplyScaleDrag(Point p)
         {
-            float cx = Source.Width / 2f;
-            float cy = Source.Height / 2f;
             double a = _baseAngle * Math.PI / 180.0;
             float cos = (float)Math.Cos(a), sin = (float)Math.Sin(a);
 
             PointF ui = U(_grab);
-            PointF uo = U((_grab + 2) % 4);
-            float dix = ui.X - uo.X, diy = ui.Y - uo.Y;
-            float len2 = dix * dix + diy * diy;
-            if (len2 < 0.0001f) { return; }
-
-            float rx = cos * dix - sin * diy;
-            float ry = sin * dix + cos * diy;
+            PointF uo = U(AnchorIndex(_grab));
+            float dux = ui.X - uo.X, duy = ui.Y - uo.Y;
             float px = p.X - _anchor.X;
             float py = p.Y - _anchor.Y;
-            float s = (px * rx + py * ry) / len2;
-            if (s < 0.1f) { s = 0.1f; }
-            if (s > 4f) { s = 4f; }
+            // 转到未旋转坐标系。
+            float lx = cos * px + sin * py;
+            float ly = -sin * px + cos * py;
 
-            // 缩放后保持锚点不动：中心 = 锚点 - R*缩放*对角偏移。
-            float mrx = cos * uo.X - sin * uo.Y;
-            float mry = sin * uo.X + cos * uo.Y;
-            _dx = (int)Math.Round(_anchor.X - s * mrx - cx);
-            _dy = (int)Math.Round(_anchor.Y - s * mry - cy);
-            SetScale((int)Math.Round(s * 100f));
+            float sx, sy;
+            if (_grab < 4)
+            {
+                // 四角：相对起始比例等比缩放。
+                float denom = _baseScaleX * dux * dux + _baseScaleY * duy * duy;
+                if (denom < 0.0001f) { return; }
+                float k = (lx * dux + ly * duy) / denom;
+                sx = _baseScaleX * k;
+                sy = _baseScaleY * k;
+            }
+            else
+            {
+                sx = (Math.Abs(dux) > 0.0001f) ? lx / dux : _baseScaleX;
+                sy = (Math.Abs(duy) > 0.0001f) ? ly / duy : _baseScaleY;
+            }
+            if (sx < 0.1f) { sx = 0.1f; }
+            if (sx > 4f) { sx = 4f; }
+            if (sy < 0.1f) { sy = 0.1f; }
+            if (sy > 4f) { sy = 4f; }
+
+            // 缩放后保持锚点不动：中心 = 锚点 - R*(S*对边偏移)。
+            float rxo = cos * (sx * uo.X) - sin * (sy * uo.Y);
+            float ryo = sin * (sx * uo.X) + cos * (sy * uo.Y);
+            _dx = (int)Math.Round(_anchor.X - rxo - PivotX());
+            _dy = (int)Math.Round(_anchor.Y - ryo - PivotY());
+            SetScaleX((int)Math.Round(sx * 100f));
+            SetScaleY((int)Math.Round(sy * 100f));
+        }
+
+        // 0<->2、1<->3（对角），4<->6、5<->7（对边）。
+        private static int AnchorIndex(int i)
+        {
+            if (i == 0) { return 2; }
+            if (i == 1) { return 3; }
+            if (i == 2) { return 0; }
+            if (i == 3) { return 1; }
+            if (i == 4) { return 6; }
+            if (i == 5) { return 7; }
+            if (i == 6) { return 4; }
+            return 5;
         }
 
         // 拖旋转柄：绕中心旋转，保持中心不动。
@@ -245,13 +293,24 @@ namespace ImageToolbox
             SetAngle((int)Math.Round(deg));
         }
 
-        private void SetScale(int percent)
+        private void SetScaleX(int percent)
         {
-            if (percent < _scale.Minimum) { percent = _scale.Minimum; }
-            if (percent > _scale.Maximum) { percent = _scale.Maximum; }
+            if (percent < _scaleX.Minimum) { percent = _scaleX.Minimum; }
+            if (percent > _scaleX.Maximum) { percent = _scaleX.Maximum; }
             _syncing = true;
-            _scale.Value = percent;
+            _scaleX.Value = percent;
             _syncing = false;
+            _scaleXV.Text = percent + "%";
+        }
+
+        private void SetScaleY(int percent)
+        {
+            if (percent < _scaleY.Minimum) { percent = _scaleY.Minimum; }
+            if (percent > _scaleY.Maximum) { percent = _scaleY.Maximum; }
+            _syncing = true;
+            _scaleY.Value = percent;
+            _syncing = false;
+            _scaleYV.Text = percent + "%";
         }
 
         private void SetAngle(int degrees)
@@ -265,36 +324,71 @@ namespace ImageToolbox
 
         // ---- 变换框几何（图层坐标）----
 
-        private PointF Center()
+        // 计算并缓存实际内容包围盒（去掉透明区域）；全透明时退回整层。
+        private void EnsureContent()
         {
-            return new PointF(Source.Width / 2f + _dx, Source.Height / 2f + _dy);
+            if (Source == null)
+            {
+                _content = Rectangle.Empty;
+                _contentFor = null;
+                return;
+            }
+            if (_contentFor == Source && _content.Width > 0 && _content.Height > 0) { return; }
+            Rectangle r = ImageFilters.ContentBounds(Source);
+            if (r.Width <= 0 || r.Height <= 0) { r = new Rectangle(0, 0, Source.Width, Source.Height); }
+            _content = r;
+            _contentFor = Source;
         }
 
-        // 左上 / 右上 / 右下 / 左下（相对中心的偏移）。
+        // 变换基准点（内容包围盒中心）在源坐标里的位置。
+        private float PivotX()
+        {
+            return (_content.Width > 0) ? _content.X + _content.Width / 2f : Source.Width / 2f;
+        }
+
+        private float PivotY()
+        {
+            return (_content.Height > 0) ? _content.Y + _content.Height / 2f : Source.Height / 2f;
+        }
+
+        private PointF Center()
+        {
+            return new PointF(PivotX() + _dx, PivotY() + _dy);
+        }
+
+        // 手柄相对内容中心的偏移（未缩放、未旋转）：
+        // 0..3 = 左上/右上/右下/左下；4..7 = 上/右/下/左 边中点。
         private PointF U(int i)
         {
-            float hw = Source.Width / 2f;
-            float hh = Source.Height / 2f;
+            float hw = _content.Width / 2f;
+            float hh = _content.Height / 2f;
             if (i == 0) { return new PointF(-hw, -hh); }
             if (i == 1) { return new PointF(hw, -hh); }
             if (i == 2) { return new PointF(hw, hh); }
-            return new PointF(-hw, hh);
+            if (i == 3) { return new PointF(-hw, hh); }
+            if (i == 4) { return new PointF(0f, -hh); }
+            if (i == 5) { return new PointF(hw, 0f); }
+            if (i == 6) { return new PointF(0f, hh); }
+            return new PointF(-hw, 0f);
+        }
+
+        // 手柄在图层坐标里的当前位置（含缩放、旋转、位移）。
+        private PointF HandleLayer(int i)
+        {
+            PointF u = U(i);
+            double a = _angle.Value * Math.PI / 180.0;
+            float cos = (float)Math.Cos(a), sin = (float)Math.Sin(a);
+            float sx = _scaleX.Value / 100f, sy = _scaleY.Value / 100f;
+            float mx = PivotX() + _dx, my = PivotY() + _dy;
+            return new PointF(
+                mx + (cos * (sx * u.X) - sin * (sy * u.Y)),
+                my + (sin * (sx * u.X) + cos * (sy * u.Y)));
         }
 
         private PointF[] QuadLayer()
         {
-            float cx = Source.Width / 2f;
-            float cy = Source.Height / 2f;
-            double a = _angle.Value * Math.PI / 180.0;
-            float cos = (float)Math.Cos(a), sin = (float)Math.Sin(a);
-            float s = _scale.Value / 100f;
-            float mx = cx + _dx, my = cy + _dy;
             PointF[] pts = new PointF[4];
-            for (int i = 0; i < 4; i++)
-            {
-                PointF u = U(i);
-                pts[i] = new PointF(mx + (cos * u.X - sin * u.Y) * s, my + (sin * u.X + cos * u.Y) * s);
-            }
+            for (int i = 0; i < 4; i++) { pts[i] = HandleLayer(i); }
             return pts;
         }
 
@@ -370,10 +464,11 @@ namespace ImageToolbox
                     PointF rot = new PointF(tx + nx * off, ty + ny * off);
                     g.DrawLine(pen, tx, ty, rot.X, rot.Y);
 
-                    for (int i = 0; i < 4; i++)
+                    for (int i = 0; i < 8; i++)
                     {
-                        g.FillRectangle(fill, c[i].X - 4f, c[i].Y - 4f, 8f, 8f);
-                        g.DrawRectangle(pen, c[i].X - 4f, c[i].Y - 4f, 8f, 8f);
+                        PointF hc = layerToClient(HandleLayer(i));
+                        g.FillRectangle(fill, hc.X - 4f, hc.Y - 4f, 8f, 8f);
+                        g.DrawRectangle(pen, hc.X - 4f, hc.Y - 4f, 8f, 8f);
                     }
                     g.FillEllipse(fill, rot.X - 5f, rot.Y - 5f, 10f, 10f);
                     g.DrawEllipse(pen, rot.X - 5f, rot.Y - 5f, 10f, 10f);
@@ -389,13 +484,14 @@ namespace ImageToolbox
         {
             if (Source == null || Canvas == null) { return null; }
             int h = HitHandle(layerPoint);
-            if (h == 4) { return Cursors.Hand; }
-            if (h >= 0 && h < 4)
+            if (h == 8) { return Cursors.Hand; }
+            if (h >= 0 && h < 8)
             {
+                PointF hp = HandleLayer(h);
                 PointF[] q = QuadLayer();
                 float cx = (q[0].X + q[1].X + q[2].X + q[3].X) / 4f;
                 float cy = (q[0].Y + q[1].Y + q[2].Y + q[3].Y) / 4f;
-                double ang = Math.Atan2(q[h].Y - cy, q[h].X - cx) * 180.0 / Math.PI;
+                double ang = Math.Atan2(hp.Y - cy, hp.X - cx) * 180.0 / Math.PI;
                 double m = ((ang % 180.0) + 180.0) % 180.0;
                 if (m < 22.5 || m >= 157.5) { return Cursors.SizeWE; }
                 if (m < 67.5) { return Cursors.SizeNWSE; }
@@ -407,26 +503,24 @@ namespace ImageToolbox
 
         // ---- 结果 ----
 
-        private static void DrawTransformInto(Graphics g, Bitmap source, int dx, int dy, float scale, float angle, InterpolationMode mode)
+        private static void DrawTransformInto(Graphics g, Bitmap source, float pivotX, float pivotY, int dx, int dy, float scaleX, float scaleY, float angle, InterpolationMode mode)
         {
             g.InterpolationMode = mode;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            float cx = source.Width / 2f;
-            float cy = source.Height / 2f;
-            g.TranslateTransform(cx + dx, cy + dy);
+            g.TranslateTransform(pivotX + dx, pivotY + dy);
             g.RotateTransform(angle);
-            g.ScaleTransform(scale, scale);
-            g.TranslateTransform(-cx, -cy);
+            g.ScaleTransform(scaleX, scaleY);
+            g.TranslateTransform(-pivotX, -pivotY);
             g.DrawImage(source, new Rectangle(0, 0, source.Width, source.Height));
         }
 
-        private Bitmap Transform(Bitmap source, int dx, int dy, float scale, float angle)
+        private Bitmap Transform(Bitmap source, int dx, int dy, float scaleX, float scaleY, float angle)
         {
             Bitmap result = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
             using (Graphics g = Graphics.FromImage(result))
             {
                 g.Clear(Color.Transparent);
-                DrawTransformInto(g, source, dx, dy, scale, angle, InterpolationMode.HighQualityBicubic);
+                DrawTransformInto(g, source, PivotX(), PivotY(), dx, dy, scaleX, scaleY, angle, InterpolationMode.HighQualityBicubic);
             }
             return result;
         }
@@ -445,7 +539,7 @@ namespace ImageToolbox
             {
                 // 预览随后还会被画布缩小显示，拖动时用双线性即可，快于双三次。
                 g.Clear(Color.Transparent);
-                DrawTransformInto(g, PreviewSource, dx, dy, _scale.Value / 100f, _angle.Value, InterpolationMode.HighQualityBilinear);
+                DrawTransformInto(g, PreviewSource, PivotX() * _previewScale, PivotY() * _previewScale, dx, dy, _scaleX.Value / 100f, _scaleY.Value / 100f, _angle.Value, InterpolationMode.HighQualityBilinear);
             }
             return _preview;
         }
@@ -453,7 +547,7 @@ namespace ImageToolbox
         public override Bitmap BuildResult()
         {
             if (Source == null || IsIdentity()) { return null; }
-            return Transform(Source, _dx, _dy, _scale.Value / 100f, _angle.Value);
+            return Transform(Source, _dx, _dy, _scaleX.Value / 100f, _scaleY.Value / 100f, _angle.Value);
         }
     }
 }

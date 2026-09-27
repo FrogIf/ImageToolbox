@@ -46,6 +46,33 @@ namespace ImageToolbox
             }
         }
 
+        // 返回非透明像素的包围盒（去掉四周透明区域）。整图全透明时返回 Rectangle.Empty。
+        public static Rectangle ContentBounds(Bitmap bmp)
+        {
+            int stride;
+            byte[] px = CopyPixels(bmp, out stride);
+            int w = bmp.Width;
+            int h = bmp.Height;
+            int minX = w, minY = h, maxX = -1, maxY = -1;
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * stride;
+                int baseIndex = row + 3;
+                for (int x = 0; x < w; x++)
+                {
+                    if (px[baseIndex + x * 4] != 0)
+                    {
+                        if (x < minX) { minX = x; }
+                        if (x > maxX) { maxX = x; }
+                        if (y < minY) { minY = y; }
+                        if (y > maxY) { maxY = y; }
+                    }
+                }
+            }
+            if (maxX < 0) { return Rectangle.Empty; }
+            return new Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
+        }
+
         public static void PastePixels(Bitmap bmp, byte[] buf)
         {
             int w = bmp.Width;

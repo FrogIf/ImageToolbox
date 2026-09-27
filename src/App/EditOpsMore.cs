@@ -101,7 +101,7 @@ namespace ImageToolbox
         public CropOp()
         {
             EditOpUi.Title(this, "裁剪 / 旋转", 10);
-            EditOpUi.Note(this, "先在画布上框选，再点「裁剪选区」；旋转/翻转点一次执行一次，可连续点击叠加。", 44, 48);
+            EditOpUi.Note(this, "先在画布上框选，再点「裁剪选区」。选区画出后可拖动整体移动、拖 8 个手柄调整大小；旋转/翻转点一次执行一次，可连续点击叠加。", 44, 48);
 
             EditOpUi.Button(this, "裁剪选区", 10, 100, 90, delegate { Do(5); });
             EditOpUi.Button(this, "顺 90°", 106, 100, 90, delegate { Do(1); });

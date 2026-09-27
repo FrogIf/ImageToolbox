@@ -24,6 +24,12 @@ namespace ImageToolbox
         private bool _dragEnabled;
         private bool _movingImage;
 
+        private bool _editingSelection;      // 正在拖动/缩放已有选区
+        private int _selHandle = -1;         // 0..3 角，4..7 边中点，8 选区内移动
+        private Rectangle _selStartRect;
+        private Point _selStartPt;
+        private Point _hoverClient;
+
         private float _zoom = 1f;
         private float _panX;
         private float _panY;
@@ -181,6 +187,12 @@ namespace ImageToolbox
             }
         }
 
+        // 是否允许拖动/缩放已有选区（裁剪、局部覆盖等可交互框选的操作）。
+        private bool SelectionEditable
+        {
+            get { return !_readOnly && !_brushEnabled && !_dragEnabled; }
+        }
+
         public void SetImage(Image image)
         {
             SetImage(image, false);
@@ -326,6 +338,21 @@ namespace ImageToolbox
                 using (Pen pen = new Pen(Color.FromArgb(0, 174, 255), 2f))
                 {
                     e.Graphics.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
+                }
+
+                // 可交互选区：画出 8 个手柄，提示可拖动/缩放。
+                if (SelectionEditable && !_dragging)
+                {
+                    PointF[] pts = SelectionHandlePoints();
+                    using (Pen pen = new Pen(Color.FromArgb(0, 174, 255), 1f))
+                    using (Brush fill = new SolidBrush(Color.White))
+                    {
+                        for (int i = 0; i < pts.Length; i++)
+                        {
+                            e.Graphics.FillRectangle(fill, pts[i].X - 4f, pts[i].Y - 4f, 8f, 8f);
+                            e.Graphics.DrawRectangle(pen, pts[i].X - 4f, pts[i].Y - 4f, 8f, 8f);
+                        }
+                    }
                 }
             }
 
@@ -474,7 +501,22 @@ namespace ImageToolbox
                 Cursor = (provided != null) ? provided : Cursors.Default;
                 return;
             }
+            if (SelectionEditable)
+            {
+                Cursor sc = SelectionCursor();
+                if (sc != null) { Cursor = sc; return; }
+            }
             UpdateCursor();
+        }
+
+        // 悬停时按选区手柄/内部返回光标；null 表示不在选区内。
+        private Cursor SelectionCursor()
+        {
+            if (_selection.Width <= 0 || _selection.Height <= 0) { return null; }
+            int h = HitSelectionHandle(_hoverClient);
+            if (h >= 0) { return HandleCursor(h); }
+            if (_selection.Contains(_hoverPoint)) { return Cursors.SizeAll; }
+            return null;
         }
 
         // 显示图坐标 -> 控件坐标（供文字就地编辑等叠加控件定位）。
@@ -536,6 +578,92 @@ namespace ImageToolbox
             return new PointF(_imageRect.X + point.X * _scale, _imageRect.Y + point.Y * _scale);
         }
 
+        // 选区手柄（客户区坐标）：0..3 角，4..7 边中点。
+        private PointF[] SelectionHandlePoints()
+        {
+            RectangleF r = ImageToControl(_selection);
+            return new PointF[]
+            {
+                new PointF(r.Left, r.Top),
+                new PointF(r.Right, r.Top),
+                new PointF(r.Right, r.Bottom),
+                new PointF(r.Left, r.Bottom),
+                new PointF((r.Left + r.Right) / 2f, r.Top),
+                new PointF(r.Right, (r.Top + r.Bottom) / 2f),
+                new PointF((r.Left + r.Right) / 2f, r.Bottom),
+                new PointF(r.Left, (r.Top + r.Bottom) / 2f)
+            };
+        }
+
+        private int HitSelectionHandle(Point client)
+        {
+            if (_selection.Width <= 0 || _selection.Height <= 0) { return -1; }
+            const float tol = 6f;
+            PointF[] pts = SelectionHandlePoints();
+            for (int i = 0; i < pts.Length; i++)
+            {
+                if (Math.Abs(client.X - pts[i].X) <= tol && Math.Abs(client.Y - pts[i].Y) <= tol)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        private static Cursor HandleCursor(int h)
+        {
+            if (h == 0 || h == 2) { return Cursors.SizeNWSE; }
+            if (h == 1 || h == 3) { return Cursors.SizeNESW; }
+            if (h == 4 || h == 6) { return Cursors.SizeNS; }
+            if (h == 5 || h == 7) { return Cursors.SizeWE; }
+            return Cursors.SizeAll;
+        }
+
+        // 按拖动的手柄更新选区：8 整体移动，0..7 调整对应边（限制在图像内，最小 1px）。
+        private void UpdateSelectionEdit(Point img)
+        {
+            if (_image == null) { return; }
+            int w = _image.Width, hgt = _image.Height;
+
+            if (_selHandle == 8)
+            {
+                int dx = img.X - _selStartPt.X;
+                int dy = img.Y - _selStartPt.Y;
+                int x = Clamp(_selStartRect.X + dx, 0, w - _selStartRect.Width);
+                int y = Clamp(_selStartRect.Y + dy, 0, hgt - _selStartRect.Height);
+                _selection = new Rectangle(x, y, _selStartRect.Width, _selStartRect.Height);
+                return;
+            }
+
+            int left = _selStartRect.Left, top = _selStartRect.Top;
+            int right = _selStartRect.Right, bottom = _selStartRect.Bottom;
+            bool west = (_selHandle == 0 || _selHandle == 3 || _selHandle == 7);
+            bool east = (_selHandle == 1 || _selHandle == 2 || _selHandle == 5);
+            bool north = (_selHandle == 0 || _selHandle == 1 || _selHandle == 4);
+            bool south = (_selHandle == 2 || _selHandle == 3 || _selHandle == 6);
+            if (west) { left = img.X; }
+            else if (east) { right = img.X; }
+            if (north) { top = img.Y; }
+            else if (south) { bottom = img.Y; }
+
+            left = Clamp(left, 0, w);
+            right = Clamp(right, 0, w);
+            top = Clamp(top, 0, hgt);
+            bottom = Clamp(bottom, 0, hgt);
+            if (right < left) { int t = left; left = right; right = t; }
+            if (bottom < top) { int t = top; top = bottom; bottom = t; }
+            if (right - left < 1) { right = Math.Min(w, left + 1); }
+            if (bottom - top < 1) { bottom = Math.Min(hgt, top + 1); }
+            _selection = new Rectangle(left, top, right - left, bottom - top);
+        }
+
+        private static int Clamp(int v, int min, int max)
+        {
+            if (v < min) { return min; }
+            if (v > max) { return max; }
+            return v;
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
@@ -557,6 +685,7 @@ namespace ImageToolbox
             }
 
             _hovering = true;
+            _hoverClient = e.Location;
             // 拖动模式（如变换框）需要留白区的真实坐标，不能被裁剪到图像边界。
             _hoverPoint = _dragEnabled ? ControlToImageRaw(e.Location) : ControlToImage(e.Location);
 
@@ -593,6 +722,22 @@ namespace ImageToolbox
                 return;
             }
 
+            // 已有选区：命中手柄则缩放，点在选区内则整体移动；否则重新框选。
+            if (SelectionEditable && _selection.Width > 0 && _selection.Height > 0)
+            {
+                int hh = HitSelectionHandle(e.Location);
+                if (hh >= 0 || _selection.Contains(_hoverPoint))
+                {
+                    _editingSelection = true;
+                    _selHandle = (hh >= 0) ? hh : 8;
+                    _selStartRect = _selection;
+                    _selStartPt = _hoverPoint;
+                    Capture = true;
+                    Invalidate();
+                    return;
+                }
+            }
+
             _dragging = true;
             _dragStart = _hoverPoint;
             _selection = new Rectangle(_dragStart, Size.Empty);
@@ -620,8 +765,16 @@ namespace ImageToolbox
             }
 
             _hovering = true;
+            _hoverClient = e.Location;
             _hoverPoint = _dragEnabled ? ControlToImageRaw(e.Location) : ControlToImage(e.Location);
             ApplyHoverCursor();
+
+            if (_editingSelection)
+            {
+                UpdateSelectionEdit(_hoverPoint);
+                Invalidate();
+                return;
+            }
 
             if (_dragEnabled)
             {
@@ -697,6 +850,23 @@ namespace ImageToolbox
                 if (BrushFinished != null)
                 {
                     BrushFinished();
+                }
+                return;
+            }
+
+            if (_editingSelection)
+            {
+                _editingSelection = false;
+                _selHandle = -1;
+                Capture = false;
+                if (_selection.Width < 1 || _selection.Height < 1)
+                {
+                    _selection = Rectangle.Empty;
+                }
+                Invalidate();
+                if (SelectionChanged != null)
+                {
+                    SelectionChanged(this, EventArgs.Empty);
                 }
                 return;
             }

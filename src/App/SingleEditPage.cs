@@ -48,6 +48,13 @@ namespace ImageToolbox
         {
             _ops = new EditOpPanel[]
             {
+                new InfoOp(),
+                new DrawOp(),
+                new TransformOp(),
+                new MattingOp(),
+                new CropOp(),
+                new CanvasOp(),
+                new LocalOverlayOp(),
                 new BasicAdjustOp(),
                 new LevelsOp(),
                 new CurveOp(),
@@ -58,18 +65,11 @@ namespace ImageToolbox
                 new LutOp(),
                 new StyleOp(),
                 new EffectsOp(),
-                new DrawOp(),
-                new TransformOp(),
-                new MattingOp(),
-                new CropOp(),
-                new CanvasOp(),
+                new ColorMatchOp(),
+                new ColorToolOp(),
                 new IdPhotoOp(),
                 new SliceCollageOp(),
-                new ColorMatchOp(),
-                new LocalOverlayOp(),
-                new ColorToolOp(),
-                new CompareOp(),
-                new InfoOp()
+                new CompareOp()
             };
 
             // 作为 MainForm 的子控件：用 Inherit，由顶层窗体的 DPI 缩放统一处理，
@@ -229,10 +229,10 @@ namespace ImageToolbox
 
             string[] names =
             {
-                "基础调整", "色阶", "曲线", "白平衡", "HSL", "局部调整", "色调", "LUT",
-                "风格预设", "特效", "绘画标注", "变换", "抠图", "裁剪 / 旋转", "画布 / 校正",
-                "证件照", "切图拼图", "取色配色", "局部覆盖",
-                "颜色工具", "图像对比", "图片信息"
+                "图片信息", "绘画标注", "变换", "抠图", "裁剪 / 旋转", "画布 / 校正",
+                "局部覆盖", "画面调节", "色阶", "曲线", "白平衡", "HSL", "局部调整",
+                "色调", "LUT", "风格预设", "特效", "取色配色", "颜色工具", "证件照",
+                "切图拼图", "图像对比"
             };
             for (int i = 0; i < names.Length; i++)
             {

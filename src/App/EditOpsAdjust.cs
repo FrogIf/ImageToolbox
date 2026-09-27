@@ -12,7 +12,7 @@ namespace ImageToolbox
 
         public BasicAdjustOp()
         {
-            EditOpUi.Title(this, "基础调整", 10);
+            EditOpUi.Title(this, "画面调节", 10);
             _bright = EditOpUi.Slider(this, "亮度", 46, -100, 100, 0, out _brightV);
             _contrast = EditOpUi.Slider(this, "对比度", 82, -100, 100, 0, out _contrastV);
             _sat = EditOpUi.Slider(this, "饱和度", 118, 0, 200, 100, out _satV);
