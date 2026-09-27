@@ -64,6 +64,18 @@ namespace ImageToolbox
             _sync = false;
         }
 
+        public override bool HasPendingResult
+        {
+            get
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    if (_curves[i] != null) { return true; }
+                }
+                return false;
+            }
+        }
+
         private TuningState State()
         {
             TuningState s = new TuningState();
@@ -234,6 +246,11 @@ namespace ImageToolbox
             _posterize.Value = 6;
         }
 
+        public override bool HasPendingResult
+        {
+            get { return _mode.SelectedIndex != 0; }
+        }
+
         private void SetVisible(Control c, bool v)
         {
             c.Visible = v;
@@ -312,6 +329,11 @@ namespace ImageToolbox
         protected override void OnResetState()
         {
             _strength.Value = 0;
+        }
+
+        public override bool HasPendingResult
+        {
+            get { return _data != null && _strength.Value > 0; }
         }
 
         private TuningState State()

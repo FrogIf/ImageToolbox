@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -10,6 +11,8 @@ namespace ImageToolbox
         public event EventHandler PreviewInvalidated;
         public event EventHandler ApplyRequested;
         public event EventHandler ResetRequested;
+        // 组合操作（如“调色”）切换子页面前触发；编辑器可用它询问未应用的修改。
+        public event CancelEventHandler SubOpChanging;
 
         protected Bitmap Source;
         protected Bitmap PreviewSource;
@@ -122,6 +125,18 @@ namespace ImageToolbox
             {
                 PreviewInvalidated(this, EventArgs.Empty);
             }
+        }
+
+        // 组合操作切换子页面前调用；返回 false 表示取消切换。
+        protected bool NotifySubOpChanging()
+        {
+            if (SubOpChanging == null)
+            {
+                return true;
+            }
+            CancelEventArgs e = new CancelEventArgs();
+            SubOpChanging(this, e);
+            return !e.Cancel;
         }
 
         public virtual void DisposeResources() { }

@@ -57,14 +57,8 @@ namespace ImageToolbox
                 new MattingOp(),
                 new CropOp(),
                 new LocalOverlayOp(),
-                new BasicAdjustOp(),
-                new LevelsOp(),
-                new CurveOp(),
-                new WhiteBalanceOp(),
-                new HslOp(),
+                new ColorGradeOp(),
                 new LocalMaskOp(),
-                new ToningOp(),
-                new LutOp(),
                 new StyleOp(),
                 new EffectsOp(),
                 new ColorMatchOp(),
@@ -231,15 +225,19 @@ namespace ImageToolbox
                 {
                     if (_ops[_active] == op) { ResetToEntry(); }
                 };
+                // 组合操作切换子页面前，同样先询问未应用的修改。
+                op.SubOpChanging += delegate(object s, CancelEventArgs e)
+                {
+                    if (_ops[_active] == op) { e.Cancel = !ResolvePendingEdits(); }
+                };
                 _opHost.Controls.Add(op);
             }
 
             string[] names =
             {
                 "图片信息", "绘画标注", "变换", "抠图", "裁剪 / 旋转",
-                "局部覆盖", "画面调节", "色阶", "曲线", "白平衡", "HSL", "局部调整",
-                "色调", "LUT", "风格预设", "特效", "取色配色", "颜色工具", "证件照",
-                "切图拼图", "图像对比"
+                "局部覆盖", "调色", "局部调整", "风格预设", "特效", "取色配色",
+                "颜色工具", "证件照", "切图拼图", "图像对比"
             };
             for (int i = 0; i < names.Length; i++)
             {

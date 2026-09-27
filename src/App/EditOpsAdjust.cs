@@ -12,7 +12,7 @@ namespace ImageToolbox
 
         public BasicAdjustOp()
         {
-            EditOpUi.Title(this, "画面调节", 10);
+            EditOpUi.Title(this, "基础", 10);
             _bright = EditOpUi.Slider(this, "亮度", 46, -100, 100, 0, out _brightV);
             _contrast = EditOpUi.Slider(this, "对比度", 82, -100, 100, 0, out _contrastV);
             _sat = EditOpUi.Slider(this, "饱和度", 118, 0, 200, 100, out _satV);
@@ -40,6 +40,15 @@ namespace ImageToolbox
         protected override void OnResetState()
         {
             Reset();
+        }
+
+        public override bool HasPendingResult
+        {
+            get
+            {
+                return _bright.Value != 0 || _contrast.Value != 0 || _sat.Value != 100 ||
+                    _temp.Value != 0 || _tint.Value != 0;
+            }
         }
 
         private void OnChange(object sender, EventArgs e)
@@ -134,6 +143,11 @@ namespace ImageToolbox
             Reset();
         }
 
+        public override bool HasPendingResult
+        {
+            get { return _black.Value != 0 || _white.Value != 255 || _gamma.Value != 100; }
+        }
+
         private void OnChange(object sender, EventArgs e)
         {
             _blackV.Text = _black.Value.ToString();
@@ -205,6 +219,16 @@ namespace ImageToolbox
             _info.Text = "已重置，请在图片上取点或点自动";
         }
 
+        public override bool HasPendingResult
+        {
+            get
+            {
+                return Math.Abs(_gain[0] - 1f) > 0.0001f ||
+                    Math.Abs(_gain[1] - 1f) > 0.0001f ||
+                    Math.Abs(_gain[2] - 1f) > 0.0001f;
+            }
+        }
+
         private void Auto()
         {
             if (Source == null) { return; }
@@ -265,6 +289,11 @@ namespace ImageToolbox
             _hue.Value = 0;
             _sat.Value = 0;
             _light.Value = 0;
+        }
+
+        public override bool HasPendingResult
+        {
+            get { return _hue.Value != 0 || _sat.Value != 0 || _light.Value != 0; }
         }
 
         private TuningState State()
