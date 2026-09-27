@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace ImageToolbox
@@ -46,6 +47,10 @@ namespace ImageToolbox
         public event Action<Point> DragStarted;
         public event Action<Point> DragMoved;
         public event Action DragFinished;
+        public event Action ViewChanged;
+
+        // 文字在画布上就地编辑时置 true：空格键交给输入框，不触发平移。
+        public bool TextEditing { get; set; }
 
         public ImageCanvas()
         {
@@ -88,7 +93,7 @@ namespace ImageToolbox
         // 全局监听空格键：鼠标悬停在画布上时按住空格进入平移模式。
         bool IMessageFilter.PreFilterMessage(ref Message m)
         {
-            if (!_zoomEnabled || !Visible || !Enabled || _image == null)
+            if (!_zoomEnabled || TextEditing || !Visible || !Enabled || _image == null)
             {
                 return false;
             }
@@ -228,28 +233,77 @@ namespace ImageToolbox
             _panY = (e.Y - iy * _scale) - cy;
             ComputeLayout();
             Invalidate();
+            RaiseViewChanged();
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        private const int WM_CTLCOLOREDIT = 0x0133;
+        private const int WM_CTLCOLORLISTBOX = 0x0134;
+        private const int WM_CTLCOLORSTATIC = 0x0138;
+        private const int TRANSPARENT = 1;
+        private const int NULL_BRUSH = 5;
+
+        [DllImport("gdi32.dll")]
+        private static extern int SetBkMode(IntPtr hdc, int mode);
+
+        [DllImport("gdi32.dll")]
+        private static extern uint SetTextColor(IntPtr hdc, int color);
+
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr GetStockObject(int fnObject);
+
+        // 编辑控件的背景色查询会发给父控件（本画布）：返回空画刷（不填充底色）并设置
+        // 透明文字模式，使就地文字输入框透出画布图像；同时保留子控件的前景色。
+        protected override void WndProc(ref Message m)
         {
-            e.Graphics.Clear(BackColor);
+            if (m.Msg == WM_CTLCOLOREDIT || m.Msg == WM_CTLCOLORSTATIC || m.Msg == WM_CTLCOLORLISTBOX)
+            {
+                Control child = Control.FromHandle(m.LParam);
+                Color fore = (child != null) ? child.ForeColor : Color.Black;
+                SetTextColor(m.WParam, ColorTranslator.ToWin32(fore));
+                SetBkMode(m.WParam, TRANSPARENT);
+                m.Result = GetStockObject(NULL_BRUSH);
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        // 按本控件的坐标绘制背景（棋盘格 + 图像）。透明子控件也可调用它把自己
+        // 所在区域画成图像，从而“透出”画布内容。
+        public void PaintView(Graphics g)
+        {
+            g.Clear(BackColor);
 
             if (_image == null)
             {
                 using (Pen border = new Pen(Color.FromArgb(200, 200, 200)))
                 {
-                    e.Graphics.DrawRectangle(border, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+                    g.DrawRectangle(border, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
                 }
                 return;
             }
 
             ComputeLayout();
+            DrawChecker(g, _imageRect);
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.DrawImage(_image, _imageRect);
+        }
 
-            DrawChecker(e.Graphics, _imageRect);
+        // 图像画在背景层：这样带 WS_EX_TRANSPARENT 的透明子控件（就地文字输入框）
+        // 请求父控件绘制背景时能透出图像。
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            PaintView(e.Graphics);
+        }
 
-            e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            e.Graphics.DrawImage(_image, _imageRect);
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (_image == null)
+            {
+                return;
+            }
+
+            ComputeLayout();
 
             if (_selection.Width > 0 && _selection.Height > 0)
             {
@@ -396,6 +450,23 @@ namespace ImageToolbox
             }
         }
 
+        // 显示图坐标 -> 控件坐标（供文字就地编辑等叠加控件定位）。
+        public PointF ImageToClient(PointF imagePoint)
+        {
+            ComputeLayout();
+            return new PointF(_imageRect.X + imagePoint.X * _scale, _imageRect.Y + imagePoint.Y * _scale);
+        }
+
+        public float ViewScale
+        {
+            get { ComputeLayout(); return _scale; }
+        }
+
+        private void RaiseViewChanged()
+        {
+            if (ViewChanged != null) { ViewChanged(); }
+        }
+
         private Point ControlToImage(Point point)
         {
             if (_image == null || _scale <= 0f)
@@ -502,6 +573,7 @@ namespace ImageToolbox
                 _panY = _panStartY + (e.Y - _panStart.Y);
                 ComputeLayout();
                 Invalidate();
+                RaiseViewChanged();
                 return;
             }
 

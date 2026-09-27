@@ -29,13 +29,13 @@ namespace ImageToolbox
             _tabs.Dock = DockStyle.Fill;
             Controls.Add(_tabs);
 
+            AddTool(new SingleEditPage());
+
             AddTool(new ToolHostPage("批处理", new ToolPage[]
             {
                 new BatchProcessPage(),
                 new MultiSizeExportPage()
             }));
-
-            AddTool(new SingleEditPage());
         }
 
         public void AddTool(ToolPage tool)

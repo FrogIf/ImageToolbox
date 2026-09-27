@@ -55,7 +55,7 @@ namespace ImageToolbox
                 new LutOp(),
                 new StyleOp(),
                 new EffectsOp(),
-                new BrushBlurOp(),
+                new DrawOp(),
                 new MattingOp(),
                 new CropOp(),
                 new CanvasOp(),
@@ -222,7 +222,7 @@ namespace ImageToolbox
             string[] names =
             {
                 "基础调整", "色阶", "曲线", "白平衡", "HSL", "局部调整", "色调", "LUT",
-                "风格预设", "特效", "画笔打码", "抠图", "裁剪 / 旋转", "画布 / 校正",
+                "风格预设", "特效", "绘画标注", "抠图", "裁剪 / 旋转", "画布 / 校正",
                 "证件照", "切图拼图", "取色配色", "局部覆盖",
                 "颜色工具", "图像对比", "图片信息"
             };
