@@ -198,6 +198,7 @@ namespace ImageToolbox
             _layerPanel.Height = 318;
             _layerPanel.MinimumSize = new Size(0, 220);
             _layerPanel.LayersChanged += delegate { OnLayersChanged(); };
+            _layerPanel.PropsChanged += delegate { SchedulePreview(); };
             _layerPanel.MoveModeChanged += delegate(bool on) { SetMoveMode(on); };
             right.Controls.Add(_layerPanel);
             _layerPanel.Bind(_session);
@@ -399,27 +400,33 @@ namespace ImageToolbox
                 return;
             }
 
-            Bitmap full;
             if (_ops[_active].DocumentLevel)
             {
-                full = _session.Composite();
+                Bitmap full = _session.Composite();
+                _opSource = full;
                 _ownOpSource = full != null;
+                if (full == null)
+                {
+                    return;
+                }
+                _previewSource = ImageUtil.CreatePreview(full, PreviewSize);
+                _ownPreviewSource = _previewSource != null;
+                if (!_ownPreviewSource)
+                {
+                    _previewSource = full;
+                }
             }
             else
             {
                 EditLayer layer = _session.ActiveLayer;
-                full = (layer == null) ? null : layer.Image;
-            }
-            _opSource = full;
-            if (full == null)
-            {
-                return;
-            }
-            _previewSource = ImageUtil.CreatePreview(full, PreviewSize);
-            _ownPreviewSource = _previewSource != null;
-            if (!_ownPreviewSource)
-            {
-                _previewSource = full;
+                _opSource = (layer == null) ? null : layer.Image;
+                if (_opSource == null)
+                {
+                    return;
+                }
+                // 借用会话里按图层缓存的缩小图，避免每次刷新都重复缩放整图。
+                _previewSource = _session.PreviewOf(layer, PreviewSize);
+                _ownPreviewSource = false;
             }
         }
 
@@ -453,12 +460,13 @@ namespace ImageToolbox
                 Bitmap display;
                 bool ownDisplay;
                 bool documentLevel = _ops[_active].DocumentLevel;
+                bool disposeOp = opPreview != null && !_ops[_active].ReusablePreview;
                 if (documentLevel || !_ops[_active].CanApply)
                 {
                     if (opPreview != null)
                     {
                         display = opPreview;
-                        ownDisplay = true;
+                        ownDisplay = disposeOp;
                     }
                     else if (documentLevel)
                     {
@@ -471,32 +479,35 @@ namespace ImageToolbox
                         ownDisplay = true;
                     }
                 }
+                else if (_session.IsSoloNormalActive)
+                {
+                    display = (opPreview != null) ? opPreview : _previewSource;
+                    ownDisplay = disposeOp;
+                }
                 else
                 {
                     Bitmap activePreview = (opPreview != null) ? opPreview : _previewSource;
                     display = _session.CompositePreview(_session.ActiveIndex, activePreview, PreviewSize);
                     ownDisplay = true;
-                    if (opPreview != null)
+                    if (disposeOp)
                     {
                         opPreview.Dispose();
                     }
                 }
 
-                if (_shownPreview != null)
-                {
-                    _shownPreview.Dispose();
-                    _shownPreview = null;
-                }
                 if (display == null)
                 {
                     display = _previewSource;
                     ownDisplay = false;
                 }
-                if (ownDisplay)
-                {
-                    _shownPreview = display;
-                }
+                // 先让画布切换到新图，再释放旧的显示图，避免画布短暂持有已释放的位图。
+                Bitmap oldShown = _shownPreview;
+                _shownPreview = ownDisplay ? display : null;
                 SetDisplay(display);
+                if (oldShown != null && !object.ReferenceEquals(oldShown, display))
+                {
+                    oldShown.Dispose();
+                }
                 UpdateBrushCursor();
             }
             catch (Exception ex)
@@ -518,7 +529,7 @@ namespace ImageToolbox
         private void SetDisplay(Bitmap bmp)
         {
             _displayImage = bmp;
-            _canvas.SetImage(bmp);
+            _canvas.SetImage(bmp, true);
         }
 
         private void UpdateBrushCursor()

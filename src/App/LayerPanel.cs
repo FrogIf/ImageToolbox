@@ -22,6 +22,7 @@ namespace ImageToolbox
         private bool _updating;
 
         public event EventHandler LayersChanged;
+        public event EventHandler PropsChanged;
         public event Action<bool> MoveModeChanged;
 
         public bool MoveMode
@@ -238,7 +239,7 @@ namespace ImageToolbox
             _session.SetVisible(layer, _visible.Checked);
             UpdateRowText();
             UpdateButtons();
-            Raise();
+            RaiseProps();
         }
 
         private void ChangeMode()
@@ -248,7 +249,7 @@ namespace ImageToolbox
             if (layer == null) { return; }
             _session.SetMode(layer, (BlendMode)Math.Max(0, _mode.SelectedIndex));
             UpdateRowText();
-            Raise();
+            RaiseProps();
         }
 
         private void ChangeOpacity()
@@ -259,7 +260,7 @@ namespace ImageToolbox
             _session.SetOpacity(layer, _opacity.Value / 100f);
             _opacityV.Text = _opacity.Value + "%";
             UpdateRowText();
-            Raise();
+            RaiseProps();
         }
 
         public void Sync()
@@ -348,6 +349,14 @@ namespace ImageToolbox
             if (LayersChanged != null)
             {
                 LayersChanged(this, EventArgs.Empty);
+            }
+        }
+
+        private void RaiseProps()
+        {
+            if (PropsChanged != null)
+            {
+                PropsChanged(this, EventArgs.Empty);
             }
         }
     }

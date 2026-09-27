@@ -29,6 +29,13 @@ namespace ImageToolbox
             get { return false; }
         }
 
+        // true 表示 RenderPreview 返回的位图仍由操作自己持有（如画笔的持久预览），
+        // 编辑器直接显示、不负责释放，可省去每个预览点一次的整图拷贝。
+        public virtual bool ReusablePreview
+        {
+            get { return false; }
+        }
+
         // true 表示该操作作用于整张文档（裁剪/画布/证件照/切图等会改变尺寸），
         // 编辑器会把合成结果作为 Source，应用时替换整个文档而不是当前图层。
         public virtual bool DocumentLevel

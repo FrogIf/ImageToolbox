@@ -52,6 +52,11 @@ namespace ImageToolbox
             get { return true; }
         }
 
+        public override bool ReusablePreview
+        {
+            get { return true; }
+        }
+
         protected override void OnActivate()
         {
             if (Canvas != null)
@@ -355,8 +360,7 @@ namespace ImageToolbox
 
         public override Bitmap RenderPreview()
         {
-            if (_result == null) { return null; }
-            return ImageFilters.Clone(_result);
+            return _result;
         }
 
         public override Bitmap BuildResult()
@@ -836,6 +840,7 @@ namespace ImageToolbox
             _overlayCanvas.Location = new Point(130, 40);
             _overlayCanvas.Size = new Size(170, 90);
             _overlayCanvas.ReadOnly = true;
+            _overlayCanvas.ZoomEnabled = false;
             Controls.Add(_overlayCanvas);
 
             EditOpUi.Caption(this, "覆盖位置", 144);
@@ -1161,6 +1166,7 @@ namespace ImageToolbox
     {
         private HistogramView _hist;
         private Label _stats;
+        private Bitmap _infoSource;
 
         public InfoOp()
         {
@@ -1185,6 +1191,8 @@ namespace ImageToolbox
         {
             if (Canvas != null) { Canvas.ReadOnly = true; }
             if (Source == null) { return; }
+            if (object.ReferenceEquals(_infoSource, Source)) { return; }
+            _infoSource = Source;
             ImageEffects.ColorStats s = ImageEffects.MeasureStats(Source, 512);
             _stats.Text =
                 "尺寸：" + Source.Width + " x " + Source.Height + " 像素\r\n" +

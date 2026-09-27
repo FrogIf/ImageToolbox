@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace ImageToolbox
 {
-    public class ImageCanvas : Control
+    public class ImageCanvas : Control, IMessageFilter
     {
         private Image _image;
         private Rectangle _selection;
@@ -23,6 +23,21 @@ namespace ImageToolbox
         private bool _dragEnabled;
         private bool _movingImage;
 
+        private float _zoom = 1f;
+        private float _panX;
+        private float _panY;
+        private int _lastImageW;
+        private int _lastImageH;
+        private bool _spaceDown;
+        private bool _panning;
+        private bool _mouseOver;
+        private bool _zoomEnabled = true;
+        private Point _panStart;
+        private float _panStartX;
+        private float _panStartY;
+        private const float MinZoom = 0.1f;
+        private const float MaxZoom = 16f;
+
         public event EventHandler SelectionChanged;
         public event Action<Point> PixelClicked;
         public event Action<Point> BrushStarted;
@@ -38,9 +53,68 @@ namespace ImageToolbox
                 ControlStyles.AllPaintingInWmPaint |
                 ControlStyles.OptimizedDoubleBuffer |
                 ControlStyles.UserPaint |
-                ControlStyles.ResizeRedraw,
+                ControlStyles.ResizeRedraw |
+                ControlStyles.Selectable,
                 true);
+            TabStop = true;
             BackColor = Color.FromArgb(245, 245, 245);
+        }
+
+        // 画布是否允许缩放/平移（缩略图等只读小图可关闭）。
+        public bool ZoomEnabled
+        {
+            get { return _zoomEnabled; }
+            set { _zoomEnabled = value; }
+        }
+
+        // 当前缩放倍率（1 = 适应窗口）。
+        public float Zoom
+        {
+            get { return _zoom; }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Application.AddMessageFilter(this);
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            Application.RemoveMessageFilter(this);
+            base.OnHandleDestroyed(e);
+        }
+
+        // 全局监听空格键：鼠标悬停在画布上时按住空格进入平移模式。
+        bool IMessageFilter.PreFilterMessage(ref Message m)
+        {
+            if (!_zoomEnabled || !Visible || !Enabled || _image == null)
+            {
+                return false;
+            }
+            const int WM_KEYDOWN = 0x100;
+            const int WM_KEYUP = 0x101;
+            const int VK_SPACE = 0x20;
+            if (m.Msg == WM_KEYDOWN && (int)m.WParam == VK_SPACE)
+            {
+                if (_mouseOver && !_spaceDown)
+                {
+                    _spaceDown = true;
+                    UpdateCursor();
+                    return true;
+                }
+            }
+            else if (m.Msg == WM_KEYUP && (int)m.WParam == VK_SPACE)
+            {
+                if (_spaceDown)
+                {
+                    _spaceDown = false;
+                    if (_panning) { EndPan(); }
+                    UpdateCursor();
+                    return true;
+                }
+            }
+            return false;
         }
 
         public bool ReadOnly
@@ -82,7 +156,7 @@ namespace ImageToolbox
             set
             {
                 _dragEnabled = value;
-                Cursor = value ? Cursors.SizeAll : Cursors.Default;
+                UpdateCursor();
                 Invalidate();
             }
         }
@@ -99,8 +173,60 @@ namespace ImageToolbox
 
         public void SetImage(Image image)
         {
+            SetImage(image, false);
+        }
+
+        // keepSelection=true 用于预览刷新：保持正在框选的选区，避免每帧被清空。
+        public void SetImage(Image image, bool keepSelection)
+        {
+            // 首次载入或画布尺寸变化时复位缩放/平移；预览刷新（同尺寸）保留视图。
+            // 注意：上一张显示图可能已被释放，所以用记录的上次尺寸比较，不能读 _image.Width。
+            bool resetView = false;
+            if (image == null) { resetView = true; }
+            else if (_image == null) { resetView = true; }
+            else if (_lastImageW != image.Width || _lastImageH != image.Height) { resetView = true; }
             _image = image;
-            _selection = Rectangle.Empty;
+            _lastImageW = (image == null) ? 0 : image.Width;
+            _lastImageH = (image == null) ? 0 : image.Height;
+            if (resetView)
+            {
+                _zoom = 1f;
+                _panX = 0f;
+                _panY = 0f;
+                _panning = false;
+            }
+            if (!keepSelection)
+            {
+                _selection = Rectangle.Empty;
+            }
+            Invalidate();
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (!_zoomEnabled || _image == null)
+            {
+                return;
+            }
+
+            ComputeLayout();
+            float factor = e.Delta > 0 ? 1.25f : (1f / 1.25f);
+            float newZoom = _zoom * factor;
+            if (newZoom < MinZoom) { newZoom = MinZoom; }
+            if (newZoom > MaxZoom) { newZoom = MaxZoom; }
+            if (Math.Abs(newZoom - _zoom) < 0.0001f) { return; }
+
+            // 以鼠标位置为锚点缩放：缩放前后该点在画布上的位置保持不变。
+            float ix = (e.X - _imageRect.X) / _scale;
+            float iy = (e.Y - _imageRect.Y) / _scale;
+            _zoom = newZoom;
+            ComputeLayout();
+            float cx = (ClientSize.Width - _image.Width * _scale) / 2f;
+            float cy = (ClientSize.Height - _image.Height * _scale) / 2f;
+            _panX = (e.X - ix * _scale) - cx;
+            _panY = (e.Y - iy * _scale) - cy;
+            ComputeLayout();
             Invalidate();
         }
 
@@ -178,18 +304,22 @@ namespace ImageToolbox
             return _checker;
         }
 
+        private static TextureBrush _checkerBrush;
+
         private static void DrawChecker(Graphics g, RectangleF rect)
         {
             if (rect.Width <= 0f || rect.Height <= 0f)
             {
                 return;
             }
-            using (TextureBrush brush = new TextureBrush(CheckerTile()))
+            if (_checkerBrush == null)
             {
-                brush.WrapMode = WrapMode.Tile;
-                brush.TranslateTransform(rect.X, rect.Y);
-                g.FillRectangle(brush, rect);
+                _checkerBrush = new TextureBrush(CheckerTile());
+                _checkerBrush.WrapMode = WrapMode.Tile;
             }
+            _checkerBrush.ResetTransform();
+            _checkerBrush.TranslateTransform(rect.X, rect.Y);
+            g.FillRectangle(_checkerBrush, rect);
         }
 
         private void ComputeLayout()
@@ -199,12 +329,71 @@ namespace ImageToolbox
                 return;
             }
 
-            float sx = (float)ClientSize.Width / _image.Width;
-            float sy = (float)ClientSize.Height / _image.Height;
-            _scale = Math.Min(sx, sy);
+            float fit = Math.Min((float)ClientSize.Width / _image.Width, (float)ClientSize.Height / _image.Height);
+            _scale = fit * _zoom;
             float w = _image.Width * _scale;
             float h = _image.Height * _scale;
-            _imageRect = new RectangleF((ClientSize.Width - w) / 2f, (ClientSize.Height - h) / 2f, w, h);
+
+            float baseX = (ClientSize.Width - w) / 2f;
+            float baseY = (ClientSize.Height - h) / 2f;
+            float x, y;
+            if (w <= ClientSize.Width)
+            {
+                x = baseX;
+                _panX = 0f;
+            }
+            else
+            {
+                x = baseX + _panX;
+                float minX = ClientSize.Width - w;
+                if (x > 0f) { x = 0f; }
+                if (x < minX) { x = minX; }
+                _panX = x - baseX;
+            }
+            if (h <= ClientSize.Height)
+            {
+                y = baseY;
+                _panY = 0f;
+            }
+            else
+            {
+                y = baseY + _panY;
+                float minY = ClientSize.Height - h;
+                if (y > 0f) { y = 0f; }
+                if (y < minY) { y = minY; }
+                _panY = y - baseY;
+            }
+            _imageRect = new RectangleF(x, y, w, h);
+        }
+
+        private void BeginPan(Point p)
+        {
+            ComputeLayout();
+            _panning = true;
+            _panStart = p;
+            _panStartX = _panX;
+            _panStartY = _panY;
+            Capture = true;
+            Cursor = Cursors.SizeAll;
+        }
+
+        private void EndPan()
+        {
+            _panning = false;
+            Capture = false;
+            UpdateCursor();
+        }
+
+        private void UpdateCursor()
+        {
+            if (_spaceDown || _panning || _dragEnabled)
+            {
+                Cursor = Cursors.SizeAll;
+            }
+            else
+            {
+                Cursor = Cursors.Default;
+            }
         }
 
         private Point ControlToImage(Point point)
@@ -238,7 +427,19 @@ namespace ImageToolbox
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (_image == null || e.Button != MouseButtons.Left)
+            if (_image == null)
+            {
+                return;
+            }
+            _mouseOver = true;
+
+            if (_zoomEnabled && (_spaceDown || e.Button == MouseButtons.Middle))
+            {
+                BeginPan(e.Location);
+                return;
+            }
+
+            if (e.Button != MouseButtons.Left)
             {
                 return;
             }
@@ -295,6 +496,15 @@ namespace ImageToolbox
                 return;
             }
 
+            if (_panning)
+            {
+                _panX = _panStartX + (e.X - _panStart.X);
+                _panY = _panStartY + (e.Y - _panStart.Y);
+                ComputeLayout();
+                Invalidate();
+                return;
+            }
+
             _hovering = true;
             _hoverPoint = ControlToImage(e.Location);
 
@@ -334,6 +544,12 @@ namespace ImageToolbox
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+
+            if (_panning)
+            {
+                EndPan();
+                return;
+            }
 
             if (_image == null)
             {
@@ -395,9 +611,16 @@ namespace ImageToolbox
             }
         }
 
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            base.OnMouseEnter(e);
+            _mouseOver = true;
+        }
+
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
+            _mouseOver = false;
             if (_hovering)
             {
                 _hovering = false;

@@ -80,6 +80,7 @@ namespace ImageToolbox
         private HistogramView _hist;
         private TrackBar _black, _white, _gamma;
         private Label _blackV, _whiteV, _gammaV;
+        private Bitmap _histSource;
 
         public LevelsOp()
         {
@@ -103,8 +104,9 @@ namespace ImageToolbox
 
         protected override void OnActivate()
         {
-            if (Source != null)
+            if (Source != null && !object.ReferenceEquals(_histSource, Source))
             {
+                _histSource = Source;
                 _hist.SetData(ImageTuning.Histogram(Source));
             }
         }

@@ -13,9 +13,7 @@ namespace ImageToolbox
         private readonly List<Bitmap> _knownBitmaps = new List<Bitmap>();
         private readonly List<EditCommand> _undo = new List<EditCommand>();
         private readonly List<EditCommand> _redo = new List<EditCommand>();
-        private readonly Dictionary<EditLayer, Bitmap> _previewCache = new Dictionary<EditLayer, Bitmap>();
-        private int _previewEpoch;
-        private int _cachedEpoch = -1;
+        private readonly Dictionary<EditLayer, PreviewEntry> _previewCache = new Dictionary<EditLayer, PreviewEntry>();
 
         private int _active = -1;
         private int _width;
@@ -47,6 +45,25 @@ namespace ImageToolbox
             get { return (_active >= 0 && _active < _layers.Count) ? _layers[_active] : null; }
         }
 
+        // 只有一个可见图层，且它就是当前图层、没有偏移/混合模式/透明度时，
+        // 合成结果就等于该图层本身，预览可以跳过整图合成（单图层编辑的主路径）。
+        public bool IsSoloNormalActive
+        {
+            get
+            {
+                int count = 0;
+                for (int i = 0; i < _layers.Count; i++)
+                {
+                    EditLayer l = _layers[i];
+                    if (!l.Visible || l.Opacity <= 0f || l.Image == null) { continue; }
+                    count++;
+                }
+                EditLayer a = ActiveLayer;
+                return count == 1 && a != null && a.Offset == Point.Empty &&
+                    a.Mode == BlendMode.Normal && a.Opacity >= 1f;
+            }
+        }
+
         public void SetOriginal(Bitmap image)
         {
             DisposeAll();
@@ -55,7 +72,6 @@ namespace ImageToolbox
             _original = Register(ImageFilters.Clone(image));
             _layers.Add(CreateLayer("背景", ImageFilters.Clone(image)));
             _active = 0;
-            BumpPreview();
             Notify();
         }
 
@@ -75,7 +91,6 @@ namespace ImageToolbox
             Bitmap before = layer.Image;
             layer.Image = Register(result);
             Push(new PixelCommand(layer, before, result));
-            BumpPreview();
         }
 
         public void CommitDocument(Bitmap result)
@@ -181,7 +196,6 @@ namespace ImageToolbox
             _layers.RemoveAt(i);
             _active = i - 1;
             Push(new MergeDownCommand(lower, upper, before, beforeOffset, after, i - 1, i));
-            BumpPreview();
         }
 
         public void StampVisible()
@@ -233,7 +247,6 @@ namespace ImageToolbox
             Point after = layer.Offset;
             if (before == after) { return; }
             Push(new MoveCommand(layer, before, after));
-            BumpPreview();
         }
 
         public void Rename(EditLayer layer, string name)
@@ -249,7 +262,6 @@ namespace ImageToolbox
             _undo.RemoveAt(_undo.Count - 1);
             cmd.Undo(this);
             _redo.Add(cmd);
-            BumpPreview();
             Notify();
         }
 
@@ -260,7 +272,6 @@ namespace ImageToolbox
             _redo.RemoveAt(_redo.Count - 1);
             cmd.Redo(this);
             _undo.Add(cmd);
-            BumpPreview();
             Notify();
         }
 
@@ -288,9 +299,7 @@ namespace ImageToolbox
                 EditLayer layer = _layers[i];
                 if (!layer.Visible || layer.Opacity <= 0f || layer.Image == null) { continue; }
                 Bitmap source = (i == layerIndex && replacement != null) ? replacement : layer.Image;
-                Bitmap next = ImageBlend.Composite(acc, source, layer.Mode, layer.Opacity, layer.Offset.X, layer.Offset.Y);
-                acc.Dispose();
-                acc = next;
+                ImageBlend.CompositeInto(acc, source, layer.Mode, layer.Opacity, layer.Offset.X, layer.Offset.Y);
             }
             return acc;
         }
@@ -298,11 +307,6 @@ namespace ImageToolbox
         public Bitmap CompositePreview(int layerIndex, Bitmap replacement, int maxSize)
         {
             if (!HasImage) { return null; }
-            if (_cachedEpoch != _previewEpoch)
-            {
-                ClearPreviewCache();
-                _cachedEpoch = _previewEpoch;
-            }
             Bitmap acc = null;
             for (int i = 0; i < _layers.Count; i++)
             {
@@ -310,24 +314,21 @@ namespace ImageToolbox
                 if (!layer.Visible || layer.Opacity <= 0f || layer.Image == null) { continue; }
                 Bitmap part = (i == layerIndex && replacement != null) ? replacement : PreviewOf(layer, maxSize);
                 if (part == null) { continue; }
-                float s = (float)part.Width / _width;
-                int offX = (int)Math.Round(layer.Offset.X * s);
-                int offY = (int)Math.Round(layer.Offset.Y * s);
                 if (acc == null)
                 {
-                    Bitmap transparent = new Bitmap(part.Width, part.Height, PixelFormat.Format32bppArgb);
-                    Bitmap first = ImageBlend.Composite(transparent, part, layer.Mode, layer.Opacity, offX, offY);
-                    transparent.Dispose();
-                    acc = first;
+                    acc = new Bitmap(part.Width, part.Height, PixelFormat.Format32bppArgb);
+                    using (Graphics g = Graphics.FromImage(acc))
+                    {
+                        g.Clear(Color.Transparent);
+                    }
                 }
-                else
-                {
-                    Bitmap next = ImageBlend.Composite(acc, part, layer.Mode, layer.Opacity, offX, offY);
-                    acc.Dispose();
-                    acc = next;
-                }
+                float s = (float)acc.Width / _width;
+                int offX = (int)Math.Round(layer.Offset.X * s);
+                int offY = (int)Math.Round(layer.Offset.Y * s);
+                ImageBlend.CompositeInto(acc, part, layer.Mode, layer.Opacity, offX, offY);
             }
             if (acc == null) { acc = new Bitmap(1, 1, PixelFormat.Format32bppArgb); }
+            PrunePreviewCache();
             return acc;
         }
 
@@ -352,8 +353,6 @@ namespace ImageToolbox
             _active = -1;
             _width = 0;
             _height = 0;
-            _previewEpoch++;
-            _cachedEpoch = -1;
             Notify();
         }
 
@@ -376,7 +375,6 @@ namespace ImageToolbox
                     top.AMode = layer.Mode;
                     top.AOpacity = layer.Opacity;
                     ClearCommands(_redo);
-                    BumpPreview();
                     Notify();
                     return;
                 }
@@ -387,7 +385,6 @@ namespace ImageToolbox
             cmd.BVisible = bv; cmd.BMode = bm; cmd.BOpacity = bo;
             cmd.AVisible = layer.Visible; cmd.AMode = layer.Mode; cmd.AOpacity = layer.Opacity;
             Push(cmd);
-            BumpPreview();
         }
 
         private void CommitStructure(Action mutate)
@@ -400,7 +397,6 @@ namespace ImageToolbox
             List<LayerState> after = CaptureStructure();
             int afterActive = _active;
             Push(new StructureCommand(before, beforeActive, beforeW, beforeH, after, afterActive, _width, _height));
-            BumpPreview();
         }
 
         private void Push(EditCommand cmd)
@@ -455,9 +451,9 @@ namespace ImageToolbox
             {
                 if (_redo[i].References(bmp)) { return true; }
             }
-            foreach (Bitmap p in _previewCache.Values)
+            foreach (PreviewEntry entry in _previewCache.Values)
             {
-                if (p == bmp) { return true; }
+                if (entry.Preview == bmp) { return true; }
             }
             return false;
         }
@@ -554,28 +550,61 @@ namespace ImageToolbox
             return dst;
         }
 
-        private Bitmap PreviewOf(EditLayer layer, int maxSize)
+        // 按图层缓存缩小后的预览；仅当该图层的 Image 变化（或请求尺寸变化）时才重新生成。
+        // 增删/移动/属性变化都不会让其他图层的缓存失效，避免重复的整图缩放。
+        internal Bitmap PreviewOf(EditLayer layer, int maxSize)
         {
-            Bitmap cached;
-            if (_previewCache.TryGetValue(layer, out cached)) { return cached; }
+            PreviewEntry entry;
+            if (layer == null || layer.Image == null) { return null; }
+            if (_previewCache.TryGetValue(layer, out entry) &&
+                object.ReferenceEquals(entry.Source, layer.Image) && entry.MaxSize == maxSize)
+            {
+                return entry.Preview;
+            }
             Bitmap small = ImageUtil.CreatePreview(layer.Image, maxSize);
-            if (small == null) { return layer.Image; }
-            _previewCache[layer] = small;
-            return small;
+            Bitmap preview = (small != null) ? small : layer.Image;
+            if (entry != null) { DisposeEntry(entry); }
+            PreviewEntry next = new PreviewEntry();
+            next.Source = layer.Image;
+            next.Preview = preview;
+            next.MaxSize = maxSize;
+            _previewCache[layer] = next;
+            return preview;
+        }
+
+        private void PrunePreviewCache()
+        {
+            if (_previewCache.Count == 0) { return; }
+            List<EditLayer> stale = null;
+            foreach (EditLayer layer in _previewCache.Keys)
+            {
+                if (!_layers.Contains(layer))
+                {
+                    if (stale == null) { stale = new List<EditLayer>(); }
+                    stale.Add(layer);
+                }
+            }
+            if (stale == null) { return; }
+            for (int i = 0; i < stale.Count; i++)
+            {
+                DisposeEntry(_previewCache[stale[i]]);
+                _previewCache.Remove(stale[i]);
+            }
+        }
+
+        private static void DisposeEntry(PreviewEntry entry)
+        {
+            if (entry == null || entry.Preview == null) { return; }
+            if (!object.ReferenceEquals(entry.Preview, entry.Source)) { entry.Preview.Dispose(); }
         }
 
         private void ClearPreviewCache()
         {
-            foreach (Bitmap bmp in _previewCache.Values)
+            foreach (PreviewEntry entry in _previewCache.Values)
             {
-                if (bmp != null) { bmp.Dispose(); }
+                DisposeEntry(entry);
             }
             _previewCache.Clear();
-        }
-
-        private void BumpPreview()
-        {
-            _previewEpoch++;
         }
 
         private int Clamp(int index)
@@ -591,6 +620,13 @@ namespace ImageToolbox
                 Changed(this, EventArgs.Empty);
             }
         }
+    }
+
+    internal class PreviewEntry
+    {
+        public Bitmap Source;
+        public Bitmap Preview;
+        public int MaxSize;
     }
 
     internal class LayerState

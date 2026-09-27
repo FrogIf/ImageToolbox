@@ -109,7 +109,25 @@ namespace ImageToolbox
         {
             int w = baseImage.Width;
             int h = baseImage.Height;
-            if (opacity < 0f) { opacity = 0f; }
+
+            Bitmap result = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(result))
+            {
+                g.CompositingMode = CompositingMode.SourceCopy;
+                g.DrawImage(baseImage, new Rectangle(0, 0, w, h));
+            }
+            CompositeInto(result, overlay, mode, opacity, offsetX, offsetY);
+            return result;
+        }
+
+        // 把 overlay 就地叠加进 acc（acc 同时作为底图和输出），避免每个图层都重新分配一张整图。
+        // 预览/画笔等高频路径下可显著降低 GC 压力。缓冲区按线程复用。
+        public static void CompositeInto(Bitmap acc, Bitmap overlay, BlendMode mode, float opacity, int offsetX, int offsetY)
+        {
+            if (acc == null || overlay == null) { return; }
+            int w = acc.Width;
+            int h = acc.Height;
+            if (opacity <= 0f) { return; }
             if (opacity > 1f) { opacity = 1f; }
 
             Bitmap scaled = overlay;
@@ -138,59 +156,64 @@ namespace ImageToolbox
                 own = true;
             }
 
-            Bitmap result = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            BitmapData ad = baseImage.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            BitmapData ad = acc.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
             BitmapData od = scaled.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            BitmapData rd = result.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
             try
             {
                 int astride = ad.Stride;
                 int ostride = od.Stride;
-                int rstride = rd.Stride;
-                byte[] abuf = new byte[astride * h];
-                byte[] obuf = new byte[ostride * h];
-                byte[] rbuf = new byte[rstride * h];
-                Marshal.Copy(ad.Scan0, abuf, 0, abuf.Length);
-                Marshal.Copy(od.Scan0, obuf, 0, obuf.Length);
+                byte[] abuf = EnsureBuffer(ref _accScratch, astride * h);
+                byte[] obuf = EnsureBuffer(ref _overScratch, ostride * h);
+                Marshal.Copy(ad.Scan0, abuf, 0, astride * h);
+                Marshal.Copy(od.Scan0, obuf, 0, ostride * h);
 
                 for (int y = 0; y < h; y++)
                 {
                     int ao = y * astride;
                     int oo = y * ostride;
-                    int ro = y * rstride;
                     for (int x = 0; x < w; x++)
                     {
                         int i = ao + x * 4;
                         int j = oo + x * 4;
-                        int k = ro + x * 4;
                         float oa = (obuf[j + 3] / 255f) * opacity;
+                        if (oa <= 0f) { continue; }
                         float aoA = abuf[i + 3] / 255f;
                         float ra = oa + aoA * (1f - oa);
                         if (ra <= 0f)
                         {
-                            rbuf[k] = 0; rbuf[k + 1] = 0; rbuf[k + 2] = 0; rbuf[k + 3] = 0;
+                            abuf[i] = 0; abuf[i + 1] = 0; abuf[i + 2] = 0; abuf[i + 3] = 0;
                             continue;
                         }
-                        rbuf[k] = CompChannel(abuf[i], obuf[j], mode, aoA, oa, ra);
-                        rbuf[k + 1] = CompChannel(abuf[i + 1], obuf[j + 1], mode, aoA, oa, ra);
-                        rbuf[k + 2] = CompChannel(abuf[i + 2], obuf[j + 2], mode, aoA, oa, ra);
-                        rbuf[k + 3] = (byte)(ra * 255f + 0.5f);
+                        abuf[i] = CompChannel(abuf[i], obuf[j], mode, aoA, oa, ra);
+                        abuf[i + 1] = CompChannel(abuf[i + 1], obuf[j + 1], mode, aoA, oa, ra);
+                        abuf[i + 2] = CompChannel(abuf[i + 2], obuf[j + 2], mode, aoA, oa, ra);
+                        abuf[i + 3] = (byte)(ra * 255f + 0.5f);
                     }
                 }
 
-                Marshal.Copy(rbuf, 0, rd.Scan0, rbuf.Length);
+                Marshal.Copy(abuf, 0, ad.Scan0, astride * h);
             }
             finally
             {
-                baseImage.UnlockBits(ad);
+                acc.UnlockBits(ad);
                 scaled.UnlockBits(od);
-                result.UnlockBits(rd);
                 if (own)
                 {
                     scaled.Dispose();
                 }
             }
-            return result;
+        }
+
+        [ThreadStatic] private static byte[] _accScratch;
+        [ThreadStatic] private static byte[] _overScratch;
+
+        private static byte[] EnsureBuffer(ref byte[] buffer, int size)
+        {
+            if (buffer == null || buffer.Length < size)
+            {
+                buffer = new byte[size];
+            }
+            return buffer;
         }
 
         private static byte CompChannel(byte baseB, byte overB, BlendMode mode, float aoA, float oa, float ra)
