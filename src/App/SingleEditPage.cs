@@ -156,14 +156,18 @@ namespace ImageToolbox
             body.Margin = new Padding(3, 3, 3, 3);
             root.Controls.Add(body, 0, 1);
 
+            BufferedListHost listHost = new BufferedListHost();
+            listHost.Dock = DockStyle.Fill;
+            listHost.Margin = new Padding(3, 3, 3, 3);
+            body.Controls.Add(listHost, 0, 0);
+
             _list = new ListBox();
             _list.Dock = DockStyle.Fill;
             _list.IntegralHeight = false;
             _list.BorderStyle = BorderStyle.FixedSingle;
             _list.ItemHeight = 26;
-            _list.Margin = new Padding(3, 3, 3, 3);
             _list.SelectedIndexChanged += delegate { OnOpSelected(); };
-            body.Controls.Add(_list, 0, 0);
+            listHost.Controls.Add(_list);
 
             _canvas = new ImageCanvas();
             _canvas.Dock = DockStyle.Fill;
@@ -896,6 +900,8 @@ namespace ImageToolbox
             this.Cursor = Cursors.WaitCursor;
             try
             {
+                // 取新图层标志要在 BuildResult 之前（BuildResult 会清掉操作内部的一次性状态）。
+                bool newLayer = _ops[_active].ResultIsNewLayer;
                 Bitmap result = _ops[_active].BuildResult();
                 if (result == null)
                 {
@@ -905,6 +911,10 @@ namespace ImageToolbox
                 if (_ops[_active].DocumentLevel)
                 {
                     _session.CommitDocument(result);
+                }
+                else if (newLayer)
+                {
+                    _session.AddImageLayer(result, "选区复制");
                 }
                 else
                 {

@@ -66,6 +66,13 @@ namespace ImageToolbox
             _hasSeed = false;
         }
 
+        // 只有确实取了色 / 选了连通区域时才算“有未应用结果”：
+        // 「清除取样」清掉取样后，切走时不应再提示应用修改。
+        public override bool HasPendingResult
+        {
+            get { return (_mode.SelectedIndex == 0) ? _hasKey : _hasSeed; }
+        }
+
         private Bitmap Render(Bitmap baseImage, float scale)
         {
             if (_mode.SelectedIndex == 0)
@@ -206,9 +213,47 @@ namespace ImageToolbox
 
     public class IdPhotoOp : EditOpPanel
     {
-        private static readonly int[] Widths = { 295, 413, 260, 390, 390 };
-        private static readonly int[] Heights = { 413, 579, 378, 567, 472 };
-        private static readonly string[] Names = { "一寸 295×413", "二寸 413×579", "小一寸 260×378", "大一寸 390×567", "小二寸 390×472" };
+        // 300 DPI 下的像素尺寸：前半为证件照规格，后半为冲印/纸张规格（A4/A3/Letter 等）。
+        private class SizePreset
+        {
+            public readonly string Name;
+            public readonly int W, H;
+            public SizePreset(string name, int w, int h) { Name = name; W = w; H = h; }
+        }
+
+        private static readonly SizePreset[] Sizes = new SizePreset[]
+        {
+            // 证件照（纵向）
+            new SizePreset("一寸 295×413", 295, 413),
+            new SizePreset("二寸 413×579", 413, 579),
+            new SizePreset("小一寸 260×378", 260, 378),
+            new SizePreset("大一寸 390×567", 390, 567),
+            new SizePreset("小二寸 390×472", 390, 472),
+            new SizePreset("驾驶证 260×378", 260, 378),
+            new SizePreset("护照 390×567", 390, 567),
+            new SizePreset("美国签证 600×600", 600, 600),
+            new SizePreset("申根签证 413×531", 413, 531),
+            // 冲印尺寸（横 / 纵）
+            new SizePreset("5 寸 横 1500×1050", 1500, 1050),
+            new SizePreset("5 寸 纵 1050×1500", 1050, 1500),
+            new SizePreset("6 寸 横 1800×1200", 1800, 1200),
+            new SizePreset("6 寸 纵 1200×1800", 1200, 1800),
+            new SizePreset("7 寸 横 2100×1500", 2100, 1500),
+            new SizePreset("7 寸 纵 1500×2100", 1500, 2100),
+            new SizePreset("8 寸 横 2400×1800", 2400, 1800),
+            new SizePreset("8 寸 纵 1800×2400", 1800, 2400),
+            new SizePreset("10 寸 横 3000×2400", 3000, 2400),
+            new SizePreset("10 寸 纵 2400×3000", 2400, 3000),
+            // 纸张尺寸（纵 / 横）
+            new SizePreset("A5 纵 1748×2480", 1748, 2480),
+            new SizePreset("A5 横 2480×1748", 2480, 1748),
+            new SizePreset("A4 纵 2480×3508", 2480, 3508),
+            new SizePreset("A4 横 3508×2480", 3508, 2480),
+            new SizePreset("A3 纵 3508×4961", 3508, 4961),
+            new SizePreset("A3 横 4961×3508", 4961, 3508),
+            new SizePreset("Letter 纵 2550×3300", 2550, 3300),
+            new SizePreset("Letter 横 3300×2550", 3300, 2550)
+        };
         private static readonly int[] PaperW = { 1500, 1800, 2480 };
         private static readonly int[] PaperH = { 1050, 1200, 3508 };
         private static readonly string[] PaperNames = { "5 寸 (1500×1050)", "6 寸 (1800×1200)", "A4 (2480×3508)" };
@@ -222,6 +267,11 @@ namespace ImageToolbox
         private Label _countV;
         private CheckBox _cut;
         private static readonly Color[] BgColors = { Color.White, Color.FromArgb(67, 142, 219), Color.FromArgb(216, 0, 0), Color.FromArgb(30, 30, 30) };
+        // 「自定义…」项的像素尺寸，以及取消自定义时用来回退的下拉项。
+        private int _customW = 295;
+        private int _customH = 413;
+        private int _lastSizeIndex;
+        private bool _suppressSize;
         // 应用到图片/放弃后置为 true：预览回到当前文档（不重复执行配置），改任一控件才重新生效。
         private bool _neutral;
 
@@ -229,8 +279,8 @@ namespace ImageToolbox
         {
             EditOpUi.Title(this, "证件照", 10);
             EditOpUi.Caption(this, "尺寸", 44);
-            _size = EditOpUi.Combo(this, 64, Names, 0);
-            _size.SelectedIndexChanged += delegate { Change(); };
+            _size = EditOpUi.Combo(this, 64, BuildSizeNames(), 0);
+            _size.SelectedIndexChanged += delegate { OnSizeChanged(); };
             EditOpUi.Caption(this, "模式", 100);
             _mode = EditOpUi.Combo(this, 120, new string[] { "裁剪填满", "完整留白" }, 0);
             _mode.SelectedIndexChanged += delegate { Change(); };
@@ -252,8 +302,55 @@ namespace ImageToolbox
             _cut.AutoSize = true;
             _cut.CheckedChanged += delegate { Change(); };
             Controls.Add(_cut);
-            EditOpUi.Note(this, "单张证件照会替换当前图；排版到相纸输出整张相纸。", 392, 48);
+            EditOpUi.Note(this, "尺寸可选证件照（一寸/二寸等）或冲印/纸张规格（横竖都有：5 寸 横/纵、A4 横/纵 等），也可「自定义…」；单张证件照会替换当前图，排版到相纸输出整张相纸。", 392, 72);
             UpdateMode();
+        }
+
+        private static string[] BuildSizeNames()
+        {
+            string[] names = new string[Sizes.Length + 1];
+            for (int i = 0; i < Sizes.Length; i++) { names[i] = Sizes[i].Name; }
+            names[Sizes.Length] = "自定义…";
+            return names;
+        }
+
+        private void OnSizeChanged()
+        {
+            if (_suppressSize) { return; }
+            if (_size.SelectedIndex >= Sizes.Length)
+            {
+                // 选到「自定义…」：弹框输入宽高，取消则退回原选项。
+                if (!PromptCustomSize())
+                {
+                    _suppressSize = true;
+                    _size.SelectedIndex = _lastSizeIndex;
+                    _suppressSize = false;
+                    return;
+                }
+            }
+            _lastSizeIndex = _size.SelectedIndex;
+            Change();
+        }
+
+        private bool PromptCustomSize()
+        {
+            using (CustomSizeDialog dialog = new CustomSizeDialog(_customW, _customH))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) { return false; }
+                _customW = dialog.PixelWidth;
+                _customH = dialog.PixelHeight;
+                return true;
+            }
+        }
+
+        // 当前目标尺寸（像素）：预设或自定义。
+        private void CurrentSize(out int w, out int h)
+        {
+            int i = Math.Max(0, _size.SelectedIndex);
+            if (i >= Sizes.Length) { w = _customW; h = _customH; }
+            else { w = Sizes[i].W; h = Sizes[i].H; }
+            if (w < 1) { w = 1; }
+            if (h < 1) { h = 1; }
         }
 
         // 控件变化：重新进入“有结果”状态并刷新预览。
@@ -285,9 +382,8 @@ namespace ImageToolbox
 
         // 单张证件照的预览按源图分辨率放大目标尺寸（保持长宽比），避免把 295×413 的小图
         // 放大到画布显示而发糊；相纸排版本身尺寸足够大，按真实尺寸预览即可。
-        private float PreviewScale(int i)
+        private float PreviewScale(int tw, int th)
         {
-            int tw = Widths[i], th = Heights[i];
             if (tw <= 0 || th <= 0 || PreviewSource == null) { return 1f; }
             float k = Math.Min((float)PreviewSource.Width / tw, (float)PreviewSource.Height / th);
             if (k < 1f) { k = 1f; }
@@ -296,14 +392,14 @@ namespace ImageToolbox
 
         private Bitmap Build(Bitmap baseImage, bool preview)
         {
-            int i = Math.Max(0, _size.SelectedIndex);
             bool fill = _mode.SelectedIndex == 0;
             Color bg = BgColors[Math.Max(0, _bg.SelectedIndex)];
 
-            int tw = Widths[i], th = Heights[i];
+            int tw, th;
+            CurrentSize(out tw, out th);
             if (preview && _output.SelectedIndex == 0)
             {
-                float k = PreviewScale(i);
+                float k = PreviewScale(tw, th);
                 tw = Math.Max(1, (int)Math.Round(tw * k));
                 th = Math.Max(1, (int)Math.Round(th * k));
             }
@@ -999,6 +1095,180 @@ namespace ImageToolbox
                 "品绿：" + s.TintRatio.ToString("0.00");
             _hist.SetData(ImageTuning.Histogram(Source));
             RaisePreview();
+        }
+    }
+
+    // 证件照「自定义尺寸」对话框：按毫米（300 DPI）或像素输入宽高，返回像素尺寸。
+    internal class CustomSizeDialog : Form
+    {
+        private const double Dpi = 300.0;
+        private NumericUpDown _width;
+        private NumericUpDown _height;
+        private ComboBox _unit;
+        private Label _hint;
+        private bool _switching;
+
+        public int PixelWidth { get { return ToPixels(_width.Value); } }
+        public int PixelHeight { get { return ToPixels(_height.Value); } }
+
+        private bool InMm { get { return _unit.SelectedIndex == 0; } }
+
+        private int ToPixels(decimal v)
+        {
+            double px = InMm ? (double)v / 25.4 * Dpi : (double)v;
+            int r = (int)Math.Round(px);
+            if (r < 1) { r = 1; }
+            if (r > 20000) { r = 20000; }
+            return r;
+        }
+
+        public CustomSizeDialog(int pxWidth, int pxHeight)
+        {
+            AutoScaleMode = AutoScaleMode.None;
+            Font = new Font("Microsoft YaHei UI", 9F);
+            Text = "自定义尺寸";
+            ClientSize = new Size(288, 176);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+
+            if (pxWidth <= 0) { pxWidth = 295; }
+            if (pxHeight <= 0) { pxHeight = 413; }
+
+            Label ul = new Label();
+            ul.Text = "单位";
+            ul.Location = new Point(16, 20);
+            ul.AutoSize = true;
+            Controls.Add(ul);
+
+            _unit = new ComboBox();
+            _unit.DropDownStyle = ComboBoxStyle.DropDownList;
+            _unit.Location = new Point(100, 16);
+            _unit.Size = new Size(160, 22);
+            _unit.Items.Add("毫米 (300 DPI)");
+            _unit.Items.Add("像素");
+            _unit.SelectedIndex = 0;
+            Controls.Add(_unit);
+
+            Label wl = new Label();
+            wl.Text = "宽度";
+            wl.Location = new Point(16, 54);
+            wl.AutoSize = true;
+            Controls.Add(wl);
+
+            _width = MakeNumber(100, 50);
+
+            Label hl = new Label();
+            hl.Text = "高度";
+            hl.Location = new Point(16, 86);
+            hl.AutoSize = true;
+            Controls.Add(hl);
+
+            _height = MakeNumber(100, 82);
+
+            _hint = new Label();
+            _hint.Location = new Point(16, 112);
+            _hint.Size = new Size(256, 20);
+            _hint.ForeColor = Color.FromArgb(90, 90, 90);
+            Controls.Add(_hint);
+
+            Button ok = new Button();
+            ok.Text = "确定";
+            ok.Location = new Point(100, 140);
+            ok.Size = new Size(74, 22);
+            ok.DialogResult = DialogResult.OK;
+            Controls.Add(ok);
+
+            Button cancel = new Button();
+            cancel.Text = "取消";
+            cancel.Location = new Point(184, 140);
+            cancel.Size = new Size(74, 22);
+            cancel.DialogResult = DialogResult.Cancel;
+            Controls.Add(cancel);
+
+            AcceptButton = ok;
+            CancelButton = cancel;
+
+            // 初始值：像素 -> 毫米。
+            _switching = true;
+            _width.Value = ClampValue((decimal)(pxWidth * 25.4 / Dpi), _width);
+            _height.Value = ClampValue((decimal)(pxHeight * 25.4 / Dpi), _height);
+            _switching = false;
+
+            _unit.SelectedIndexChanged += delegate { OnUnitChanged(); };
+            _width.ValueChanged += delegate { UpdateHint(); };
+            _height.ValueChanged += delegate { UpdateHint(); };
+            UpdateHint();
+        }
+
+        private NumericUpDown MakeNumber(int x, int y)
+        {
+            NumericUpDown box = new NumericUpDown();
+            box.Location = new Point(x, y);
+            box.Size = new Size(160, 22);
+            box.DecimalPlaces = 1;
+            box.Minimum = 0.1m;
+            box.Maximum = 2000m;
+            box.Increment = 0.5m;
+            Controls.Add(box);
+            return box;
+        }
+
+        // 切换单位时把当前数值换算过去。
+        private void OnUnitChanged()
+        {
+            if (_switching) { return; }
+            _switching = true;
+            bool toMm = InMm;
+            decimal w = _width.Value, h = _height.Value;
+            if (toMm)
+            {
+                decimal mw = (decimal)Math.Round((double)w * 25.4 / Dpi, 1);
+                decimal mh = (decimal)Math.Round((double)h * 25.4 / Dpi, 1);
+                SetRange(_width, 2000m, 1);
+                SetRange(_height, 2000m, 1);
+                _width.Value = ClampValue(mw, _width);
+                _height.Value = ClampValue(mh, _height);
+            }
+            else
+            {
+                decimal pw = (decimal)Math.Round((double)w / 25.4 * Dpi);
+                decimal ph = (decimal)Math.Round((double)h / 25.4 * Dpi);
+                SetRange(_width, 20000m, 0);
+                SetRange(_height, 20000m, 0);
+                _width.Value = ClampValue(pw, _width);
+                _height.Value = ClampValue(ph, _height);
+            }
+            _switching = false;
+            UpdateHint();
+        }
+
+        private static void SetRange(NumericUpDown box, decimal max, int decimals)
+        {
+            box.DecimalPlaces = decimals;
+            box.Increment = (decimals == 0) ? 10m : 0.5m;
+            box.Minimum = (decimals == 0) ? 1m : 0.1m;
+            box.Maximum = max;
+        }
+
+        private static decimal ClampValue(decimal v, NumericUpDown box)
+        {
+            if (v < box.Minimum) { return box.Minimum; }
+            if (v > box.Maximum) { return box.Maximum; }
+            return v;
+        }
+
+        private void UpdateHint()
+        {
+            _hint.Text = "约 " + PixelWidth + " × " + PixelHeight + " 像素";
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            DpiScaler.Apply(this, true);
         }
     }
 }

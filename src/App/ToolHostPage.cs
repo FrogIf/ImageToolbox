@@ -70,13 +70,17 @@ namespace ImageToolbox
             header.BackColor = Color.FromArgb(238, 238, 238);
             leftGrid.Controls.Add(header, 0, 0);
 
+            BufferedListHost listHost = new BufferedListHost();
+            listHost.Dock = DockStyle.Fill;
+            leftGrid.Controls.Add(listHost, 0, 1);
+
             _list = new ListBox();
             _list.Dock = DockStyle.Fill;
             _list.IntegralHeight = false;
             _list.BorderStyle = BorderStyle.FixedSingle;
             _list.ItemHeight = 24;
             _list.SelectedIndexChanged += delegate { ShowSelected(); };
-            leftGrid.Controls.Add(_list, 0, 1);
+            listHost.Controls.Add(_list);
 
             _content = new Panel();
             _content.Dock = DockStyle.Fill;

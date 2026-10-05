@@ -76,6 +76,13 @@ namespace ImageToolbox
             get { return false; }
         }
 
+        // true 表示 BuildResult 的结果应作为**新图层**插入到当前图层之上，而不是替换当前图层。
+        // 用于选区的「复制到新图层」；编辑器在调用 BuildResult 之前读取该值。
+        public virtual bool ResultIsNewLayer
+        {
+            get { return false; }
+        }
+
         public virtual string Hint
         {
             get { return ""; }

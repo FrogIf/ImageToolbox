@@ -103,7 +103,7 @@ namespace ImageToolbox
             EditOpUi.Button(this, "完成多边形", 10, 376, 120, delegate { FinishPolygon(); });
             EditOpUi.Button(this, "清除路径", 138, 376, 118, delegate { CancelPath(); });
 
-            EditOpUi.Note(this, "矩形/圆形拖动框选；画笔涂抹；套索按住拖动；多边形逐点单击、双击或点回起点闭合；磁性套索沿边缘拖动自动吸附，磁力控制吸附范围。运算控制与已有选区的合并方式。删除/填充/贴入会立即作用到当前图层；复制后可贴入。羽化在应用时生效。", 416, 104);
+            EditOpUi.Note(this, "矩形/圆形拖动框选；画笔涂抹；套索按住拖动；多边形逐点单击、双击或点回起点闭合；磁性套索沿边缘拖动自动吸附，磁力控制吸附范围。运算控制与已有选区的合并方式。删除/填充/贴入会立即作用到当前图层；复制会新建一个图层并放入选中内容（同时写入剪贴板，可再「贴入」）。羽化在应用时生效。", 416, 104);
 
             _ants = new Timer();
             _ants.Interval = 110;
@@ -118,6 +118,12 @@ namespace ImageToolbox
         public override bool HasPendingResult
         {
             get { return false; }
+        }
+
+        // 复制（action 4）的结果要作为新图层插入，而不是替换当前图层。
+        public override bool ResultIsNewLayer
+        {
+            get { return _pending == 4; }
         }
 
         public override bool WantsCanvasDrag
@@ -264,7 +270,9 @@ namespace ImageToolbox
 
         private void CutSel()
         {
-            CopySel();
+            EnsureSelection();
+            if (Source == null || _sel == null || _sel.IsEmpty) { return; }
+            CopySelectionToClipboard();
             DoAction(1);
         }
 
@@ -282,10 +290,17 @@ namespace ImageToolbox
             }
         }
 
+        // 复制：把选中内容放到一个自动新建的图层里（其余透明）；同时写入剪贴板，仍可「贴入」。
         private void CopySel()
         {
             EnsureSelection();
             if (Source == null || _sel == null || _sel.IsEmpty) { return; }
+            CopySelectionToClipboard();
+            DoAction(4);
+        }
+
+        private void CopySelectionToClipboard()
+        {
             Rectangle b = _sel.Bounds();
             if (b.Width < 1 || b.Height < 1) { return; }
 
@@ -620,7 +635,35 @@ namespace ImageToolbox
             {
                 return PasteMasked(mask);
             }
+            if (action == 4)
+            {
+                return CopyToNewLayer(mask);
+            }
             return null;
+        }
+
+        // 把选中内容做成一张与文档同尺寸、其余透明的位图，供「复制到新图层」使用。
+        private Bitmap CopyToNewLayer(byte[] mask)
+        {
+            Rectangle b = _sel.Bounds();
+            if (b.Width < 1 || b.Height < 1) { return null; }
+            Bitmap result = new Bitmap(Source.Width, Source.Height, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(result)) { g.Clear(Color.Transparent); }
+            using (Bitmap piece = new Bitmap(b.Width, b.Height, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(piece))
+                {
+                    g.Clear(Color.Transparent);
+                    g.DrawImage(Source, new Rectangle(0, 0, b.Width, b.Height), b, GraphicsUnit.Pixel);
+                }
+                ApplyMaskToPiece(piece, b, mask);
+                using (Graphics g = Graphics.FromImage(result))
+                {
+                    g.CompositingMode = CompositingMode.SourceOver;
+                    g.DrawImage(piece, b.X, b.Y);
+                }
+            }
+            return result;
         }
 
         private static int Blend(int a, int b, int t)

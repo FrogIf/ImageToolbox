@@ -134,7 +134,10 @@ namespace ImageToolbox
                 SetOriginal(image);
                 return;
             }
-            EditLayer layer = CreateLayer(name, Register(FitToCanvas(image)));
+            // 已经与文档同尺寸的位图直接放进去，避免再走一次 1:1 的双三次重采样
+            // （透明边缘会被插值核采样出一圈白边）；尺寸不符时才适配到画布。
+            Bitmap content = (image.Width == _width && image.Height == _height) ? image : FitToCanvas(image);
+            EditLayer layer = CreateLayer(name, Register(content));
             CommitStructure(delegate
             {
                 _layers.Insert(_active + 1, layer);

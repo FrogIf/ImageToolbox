@@ -223,12 +223,16 @@ namespace ImageToolbox
             float factor = _previewScale * Canvas.ViewScale;
             if (factor <= 0.0001f) { return -1; }
             float tol = 8f / factor;
-            PointF[] q = QuadLayer();
             for (int i = 0; i < 8; i++)
             {
                 if (Distance(p, HandleLayer(i)) <= tol) { return i; }
             }
-            if (Distance(p, RotationHandle(q, factor)) <= tol) { return 8; }
+            // 旋转柄按客户区几何计算（放大后会在顶边内侧），再换算回图层坐标比较。
+            PointF origin = Canvas.ImageToClient(new PointF(0f, 0f));
+            PointF rotClient = RotationHandleClient(QuadClient());
+            PointF rotLayer = new PointF(
+                (rotClient.X - origin.X) / factor, (rotClient.Y - origin.Y) / factor);
+            if (Distance(p, rotLayer) <= tol) { return 8; }
             return -1;
         }
 
@@ -399,34 +403,57 @@ namespace ImageToolbox
             return pts;
         }
 
-        // 顶边中点向外偏移 22 个客户区像素处的旋转柄位置。
-        private PointF RotationHandle(PointF[] q, float factor)
+        // 四角在客户区里的位置（按图层坐标 -> 预览坐标 -> 客户区映射）。
+        private PointF[] QuadClient()
         {
-            float tx = (q[0].X + q[1].X) / 2f;
-            float ty = (q[0].Y + q[1].Y) / 2f;
-            float dx = q[1].X - q[0].X;
-            float dy = q[1].Y - q[0].Y;
+            PointF[] pts = new PointF[4];
+            for (int i = 0; i < 4; i++)
+            {
+                PointF h = HandleLayer(i);
+                pts[i] = Canvas.ImageToClient(new PointF(h.X * _previewScale, h.Y * _previewScale));
+            }
+            return pts;
+        }
+
+        // 旋转柄在客户区里的位置：顶边中点沿外法线外移 22px。
+        // 关键：外移量是否放得下要按**顶边**相对画布控件的位置判断，而不是整张图的上边距——
+        // 图片放大后图层顶边可能在控件外，但实际内容包围盒的顶边仍在控件内。
+        // 外侧放不下时把柄移到顶边内侧，避免它正好压在包围盒边线上（放大时曾出现该问题）。
+        private PointF RotationHandleClient(PointF[] c)
+        {
+            float tx = (c[0].X + c[1].X) / 2f;
+            float ty = (c[0].Y + c[1].Y) / 2f;
+            float dx = c[1].X - c[0].X;
+            float dy = c[1].Y - c[0].Y;
             float len = (float)Math.Sqrt(dx * dx + dy * dy);
             float nx = 0f, ny = -1f;
             if (len > 0.0001f)
             {
                 nx = -dy / len;
                 ny = dx / len;
-                float cx = (q[0].X + q[1].X + q[2].X + q[3].X) / 4f;
-                float cy = (q[0].Y + q[1].Y + q[2].Y + q[3].Y) / 4f;
+                float cx = (c[0].X + c[1].X + c[2].X + c[3].X) / 4f;
+                float cy = (c[0].Y + c[1].Y + c[2].Y + c[3].Y) / 4f;
                 if (nx * (tx - cx) + ny * (ty - cy) < 0f) { nx = -nx; ny = -ny; }
             }
-            float off = RotationOffsetClient() / factor;
-            return new PointF(tx + nx * off, ty + ny * off);
-        }
 
-        // 旋转柄相对顶边的外移量（客户区像素）。留白不足时收进来，
-        // 避免柄落到画布控件之外而无法抓取；绘制与命中都用它以保证一致。
-        private float RotationOffsetClient()
-        {
-            if (Canvas == null) { return 22f; }
-            float margin = Canvas.ImageToClient(new PointF(0f, 0f)).Y;
-            return (margin < 26f) ? Math.Max(0f, margin - 4f) : 22f;
+            const float desired = 22f;
+            const float pad = 7f;   // 柄半径 5 + 余量
+            float w = (Canvas != null) ? Canvas.ClientSize.Width : 0f;
+            float h = (Canvas != null) ? Canvas.ClientSize.Height : 0f;
+
+            // 从顶边中点沿外法线走到控件边界的最大距离。
+            float tMax = float.MaxValue;
+            if (nx > 0.0001f) { tMax = Math.Min(tMax, (w - pad - tx) / nx); }
+            else if (nx < -0.0001f) { tMax = Math.Min(tMax, (pad - tx) / nx); }
+            if (ny > 0.0001f) { tMax = Math.Min(tMax, (h - pad - ty) / ny); }
+            else if (ny < -0.0001f) { tMax = Math.Min(tMax, (pad - ty) / ny); }
+
+            float off;
+            if (tMax >= desired) { off = desired; }
+            else if (tMax >= 12f) { off = tMax; }
+            else { off = -desired; }   // 外侧没有空间：放到顶边内侧，保证不与边线重叠且可抓取
+
+            return new PointF(tx + nx * off, ty + ny * off);
         }
 
         private static float Distance(Point p, PointF f)
@@ -455,20 +482,7 @@ namespace ImageToolbox
 
                     float tx = (c[0].X + c[1].X) / 2f;
                     float ty = (c[0].Y + c[1].Y) / 2f;
-                    float dx = c[1].X - c[0].X;
-                    float dy = c[1].Y - c[0].Y;
-                    float len = (float)Math.Sqrt(dx * dx + dy * dy);
-                    float nx = 0f, ny = -1f;
-                    if (len > 0.0001f)
-                    {
-                        nx = -dy / len;
-                        ny = dx / len;
-                        float cx = (c[0].X + c[1].X + c[2].X + c[3].X) / 4f;
-                        float cy = (c[0].Y + c[1].Y + c[2].Y + c[3].Y) / 4f;
-                        if (nx * (tx - cx) + ny * (ty - cy) < 0f) { nx = -nx; ny = -ny; }
-                    }
-                    float off = RotationOffsetClient();
-                    PointF rot = new PointF(tx + nx * off, ty + ny * off);
+                    PointF rot = RotationHandleClient(c);
                     g.DrawLine(pen, tx, ty, rot.X, rot.Y);
 
                     for (int i = 0; i < 8; i++)
