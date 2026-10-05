@@ -19,6 +19,7 @@ namespace ImageToolbox
         private const int ToolLasso = 3;
         private const int ToolPolygon = 4;
         private const int ToolMagnetic = 5;
+        private const int ToolOpaque = 6;   // 选择不透明（按图层 alpha 选中已有像素）
 
         private ComboBox _tool;
         private ComboBox _combine;
@@ -65,7 +66,7 @@ namespace ImageToolbox
             EditOpUi.Caption(this, "方式", 44);
             _tool = EditOpUi.Combo(this, 64, new string[]
             {
-                "矩形框选", "圆形框选", "画笔", "套索", "多边形套索", "磁性套索"
+                "矩形框选", "圆形框选", "画笔", "套索", "多边形套索", "磁性套索", "选择不透明"
             }, 0);
             _tool.SelectedIndexChanged += delegate { OnToolChanged(); };
 
@@ -103,7 +104,7 @@ namespace ImageToolbox
             EditOpUi.Button(this, "完成多边形", 10, 376, 120, delegate { FinishPolygon(); });
             EditOpUi.Button(this, "清除路径", 138, 376, 118, delegate { CancelPath(); });
 
-            EditOpUi.Note(this, "矩形/圆形拖动框选；画笔涂抹；套索按住拖动；多边形逐点单击、双击或点回起点闭合；磁性套索沿边缘拖动自动吸附，磁力控制吸附范围。运算控制与已有选区的合并方式。删除/填充/贴入会立即作用到当前图层；复制会新建一个图层并放入选中内容（同时写入剪贴板，可再「贴入」）。羽化在应用时生效。", 416, 104);
+            EditOpUi.Note(this, "矩形/圆形拖动框选；画笔涂抹；套索按住拖动；多边形逐点单击、双击或点回起点闭合；磁性套索沿边缘拖动自动吸附，磁力控制吸附范围；方式选「选择不透明」时按当前图层 alpha 选中已有像素（轮廓）。运算控制与已有选区的合并方式。删除/填充/贴入会立即作用到当前图层；复制会新建一个图层并放入选中内容（同时写入剪贴板，可再「贴入」）。羽化在应用时生效。", 416, 120);
 
             _ants = new Timer();
             _ants.Interval = 110;
@@ -235,6 +236,8 @@ namespace ImageToolbox
             _lum = null;
             _lumSource = null;
             ApplyCanvasMode();
+            // 「选择不透明」不是拖动工具：选中即刻按当前图层 alpha 选中已有像素。
+            if (_tool.SelectedIndex == ToolOpaque) { SelectOpaque(); }
             if (Canvas != null) { Canvas.Invalidate(); }
         }
 
@@ -262,6 +265,17 @@ namespace ImageToolbox
             if (_sel == null) { return; }
             _sel.Clear();
             _version++;
+            if (Canvas != null) { Canvas.Invalidate(); }
+        }
+
+        // 选择不透明：按当前图层 alpha 选中已有像素（轮廓），遵循「运算」的合并方式。
+        private void SelectOpaque()
+        {
+            EnsureSelection();
+            if (_sel == null || Source == null) { return; }
+            byte[] shape = ImageSelection.FromAlpha(Source);
+            if (shape == null) { return; }
+            CombineShape(shape);
             if (Canvas != null) { Canvas.Invalidate(); }
         }
 

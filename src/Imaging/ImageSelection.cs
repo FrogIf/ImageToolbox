@@ -40,6 +40,27 @@ namespace ImageToolbox
             for (int i = 0; i < _mask.Length; i++) { _mask[i] = (byte)(255 - _mask[i]); }
         }
 
+        // 由位图的 alpha 通道生成选区遮罩：不透明处=255、透明处=0，半透明按 alpha 取值。
+        // 用于「选择不透明」——选中当前图层已有像素的轮廓。
+        public static byte[] FromAlpha(Bitmap image)
+        {
+            if (image == null) { return null; }
+            int w = image.Width, h = image.Height;
+            int stride;
+            byte[] px = ImageFilters.CopyPixels(image, out stride);
+            byte[] mask = new byte[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * stride;
+                int mrow = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    mask[mrow + x] = px[row + x * 4 + 3];
+                }
+            }
+            return mask;
+        }
+
         // mode: 0 新建（覆盖）, 1 加选, 2 减选, 3 交集。shape 为整图大小的 0/255 覆盖。
         public void Combine(byte[] shape, int mode)
         {
