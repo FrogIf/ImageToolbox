@@ -679,6 +679,25 @@ namespace ImageToolbox
                 Bitmap display;
                 bool ownDisplay;
                 bool documentLevel = _ops[_active].DocumentLevel;
+
+                // 图层锁：让预览也遵守锁定，做到「看到什么就应用什么」。
+                //   锁定图像像素 -> 不显示该操作的改动（直接看原样/整图合成）；
+                //   锁定透明像素 -> 预览 alpha 采用原图层 alpha（透明处保持透明）。
+                EditLayer act = _session.ActiveLayer;
+                if (!documentLevel && act != null && opPreview != null)
+                {
+                    if (act.LockImage)
+                    {
+                        if (!_ops[_active].ReusablePreview) { opPreview.Dispose(); }
+                        opPreview = null;
+                    }
+                    else if (act.LockTransparent && _previewSource != null &&
+                        opPreview.Width == _previewSource.Width && opPreview.Height == _previewSource.Height)
+                    {
+                        EditSession.ApplyAlphaLock(opPreview, _previewSource);
+                    }
+                }
+
                 bool disposeOp = opPreview != null && !_ops[_active].ReusablePreview;
                 if (documentLevel || !_ops[_active].CanApply)
                 {
@@ -930,6 +949,16 @@ namespace ImageToolbox
                     label = (_active < _list.Items.Count) ? _list.Items[_active].ToString() : "操作";
                 }
                 bool newLayer = _ops[_active].ResultIsNewLayer;
+                // 锁定图像像素：不改当前图层的像素，直接拦截（文档级/新建图层不受影响）。
+                if (!_ops[_active].DocumentLevel && !newLayer)
+                {
+                    EditLayer locked = _session.ActiveLayer;
+                    if (locked != null && locked.LockImage)
+                    {
+                        _status.Text = "当前图层已锁定图像像素，无法应用像素修改";
+                        return false;
+                    }
+                }
                 Bitmap result = _ops[_active].BuildResult();
                 if (result == null)
                 {

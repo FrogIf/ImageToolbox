@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using PixelFormat = System.Drawing.Imaging.PixelFormat;
 
 namespace ImageToolbox
@@ -114,14 +116,56 @@ namespace ImageToolbox
             {
                 return;
             }
+            // 锁定图像像素：任何像素改动都不生效（编辑器通常已在应用前拦截，这里再兜底一次）。
+            if (layer.LockImage)
+            {
+                result.Dispose();
+                return;
+            }
             if (result.Width != _width || result.Height != _height)
             {
                 CommitDocument(result, label);
                 return;
             }
+            // 锁定透明像素：结果 alpha 采用原图层 alpha（透明处保持透明、alpha 不变）。
+            if (layer.LockTransparent && layer.Image != null)
+            {
+                ApplyAlphaLock(result, layer.Image);
+            }
             Bitmap before = layer.Image;
             layer.Image = Register(result);
             Push(new PixelCommand(layer, before, result), label);
+        }
+
+        // 把 result 的 alpha 通道替换为 original 的 alpha（两者同尺寸，均为 32bppArgb）。
+        internal static void ApplyAlphaLock(Bitmap result, Bitmap original)
+        {
+            if (result == null || original == null) { return; }
+            if (result.Width != original.Width || result.Height != original.Height || result.Width < 1) { return; }
+            BitmapData dr = result.LockBits(new Rectangle(0, 0, result.Width, result.Height), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+            BitmapData sr = original.LockBits(new Rectangle(0, 0, original.Width, original.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                int drs = dr.Stride, srs = sr.Stride;
+                byte[] dbuf = new byte[drs * result.Height];
+                byte[] sbuf = new byte[srs * original.Height];
+                Marshal.Copy(dr.Scan0, dbuf, 0, dbuf.Length);
+                Marshal.Copy(sr.Scan0, sbuf, 0, sbuf.Length);
+                for (int y = 0; y < result.Height; y++)
+                {
+                    int drow = y * drs, srow = y * srs;
+                    for (int x = 0; x < result.Width; x++)
+                    {
+                        dbuf[drow + x * 4 + 3] = sbuf[srow + x * 4 + 3];
+                    }
+                }
+                Marshal.Copy(dbuf, 0, dr.Scan0, dbuf.Length);
+            }
+            finally
+            {
+                result.UnlockBits(dr);
+                original.UnlockBits(sr);
+            }
         }
 
         public void CommitDocument(Bitmap result)
@@ -333,6 +377,28 @@ namespace ImageToolbox
             if (opacity > 1f) { opacity = 1f; }
             if (layer == null || layer.Opacity == opacity) { return; }
             PushProps(layer, delegate { layer.Opacity = opacity; }, label);
+        }
+
+        public void SetLockTransparent(EditLayer layer, bool value)
+        {
+            SetLockTransparent(layer, value, null);
+        }
+
+        public void SetLockTransparent(EditLayer layer, bool value, string label)
+        {
+            if (layer == null || layer.LockTransparent == value) { return; }
+            PushProps(layer, delegate { layer.LockTransparent = value; }, label);
+        }
+
+        public void SetLockImage(EditLayer layer, bool value)
+        {
+            SetLockImage(layer, value, null);
+        }
+
+        public void SetLockImage(EditLayer layer, bool value, string label)
+        {
+            if (layer == null || layer.LockImage == value) { return; }
+            PushProps(layer, delegate { layer.LockImage = value; }, label);
         }
 
         public void CommitOffset(EditLayer layer, Point before)
@@ -676,8 +742,11 @@ namespace ImageToolbox
             bool bv = layer.Visible;
             BlendMode bm = layer.Mode;
             float bo = layer.Opacity;
+            bool blt = layer.LockTransparent;
+            bool bli = layer.LockImage;
             apply();
-            if (bv == layer.Visible && bm == layer.Mode && bo == layer.Opacity) { return; }
+            if (bv == layer.Visible && bm == layer.Mode && bo == layer.Opacity &&
+                blt == layer.LockTransparent && bli == layer.LockImage) { return; }
 
             if (_undo.Count > 0)
             {
@@ -687,6 +756,8 @@ namespace ImageToolbox
                     top.AVisible = layer.Visible;
                     top.AMode = layer.Mode;
                     top.AOpacity = layer.Opacity;
+                    top.ALockTransparent = layer.LockTransparent;
+                    top.ALockImage = layer.LockImage;
                     if (!string.IsNullOrEmpty(label)) { top.Label = label; }
                     ClearCommands(_redo);
                     Notify();
@@ -697,7 +768,9 @@ namespace ImageToolbox
             PropsCommand cmd = new PropsCommand();
             cmd.Layer = layer;
             cmd.BVisible = bv; cmd.BMode = bm; cmd.BOpacity = bo;
+            cmd.BLockTransparent = blt; cmd.BLockImage = bli;
             cmd.AVisible = layer.Visible; cmd.AMode = layer.Mode; cmd.AOpacity = layer.Opacity;
+            cmd.ALockTransparent = layer.LockTransparent; cmd.ALockImage = layer.LockImage;
             Push(cmd, label);
         }
 
@@ -796,6 +869,8 @@ namespace ImageToolbox
                 state.Mode = layer.Mode;
                 state.Opacity = layer.Opacity;
                 state.Offset = layer.Offset;
+                state.LockTransparent = layer.LockTransparent;
+                state.LockImage = layer.LockImage;
                 list.Add(state);
             }
             return list;
@@ -812,6 +887,8 @@ namespace ImageToolbox
                 state.Layer.Mode = state.Mode;
                 state.Layer.Opacity = state.Opacity;
                 state.Layer.Offset = state.Offset;
+                state.Layer.LockTransparent = state.LockTransparent;
+                state.Layer.LockImage = state.LockImage;
                 _layers.Add(state.Layer);
             }
             _width = w;
@@ -964,6 +1041,8 @@ namespace ImageToolbox
         public BlendMode Mode;
         public float Opacity;
         public Point Offset;
+        public bool LockTransparent;
+        public bool LockImage;
     }
 
     internal abstract class EditCommand
@@ -1093,15 +1172,21 @@ namespace ImageToolbox
         public bool BVisible;
         public BlendMode BMode;
         public float BOpacity;
+        public bool BLockTransparent;
+        public bool BLockImage;
         public bool AVisible;
         public BlendMode AMode;
         public float AOpacity;
+        public bool ALockTransparent;
+        public bool ALockImage;
 
         public override void Undo(EditSession session)
         {
             Layer.Visible = BVisible;
             Layer.Mode = BMode;
             Layer.Opacity = BOpacity;
+            Layer.LockTransparent = BLockTransparent;
+            Layer.LockImage = BLockImage;
         }
 
         public override void Redo(EditSession session)
@@ -1109,6 +1194,8 @@ namespace ImageToolbox
             Layer.Visible = AVisible;
             Layer.Mode = AMode;
             Layer.Opacity = AOpacity;
+            Layer.LockTransparent = ALockTransparent;
+            Layer.LockImage = ALockImage;
         }
     }
 }

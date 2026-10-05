@@ -26,6 +26,8 @@ namespace ImageToolbox
         private ComboBox _mode;
         private TrackBar _opacity;
         private Label _opacityV;
+        private CheckBox _lockTransparent;
+        private CheckBox _lockImage;
         private ContextMenuStrip _menu;
         private ToolStripMenuItem _miVisible;
         private ToolStripMenuItem _miRename;
@@ -64,7 +66,7 @@ namespace ImageToolbox
 
             Panel bottom = new Panel();
             bottom.Dock = DockStyle.Bottom;
-            bottom.Height = 86;
+            bottom.Height = 116;
 
             _list = new ListBox();
             _list.Dock = DockStyle.Fill;
@@ -153,10 +155,24 @@ namespace ImageToolbox
             _opacityV.TextAlign = ContentAlignment.MiddleRight;
             bottom.Controls.Add(_opacityV);
 
+            _lockTransparent = new CheckBox();
+            _lockTransparent.Text = "锁定透明像素";
+            _lockTransparent.Location = new Point(2, 56);
+            _lockTransparent.AutoSize = true;
+            _lockTransparent.CheckedChanged += delegate { ChangeLockTransparent(); };
+            bottom.Controls.Add(_lockTransparent);
+
+            _lockImage = new CheckBox();
+            _lockImage.Text = "锁定图像像素";
+            _lockImage.Location = new Point(146, 56);
+            _lockImage.AutoSize = true;
+            _lockImage.CheckedChanged += delegate { ChangeLockImage(); };
+            bottom.Controls.Add(_lockImage);
+
             Label hint = new Label();
             hint.Text = "操作作用于选中图层；画布显示所有图层的合成结果。\r\n右键图层可显示/隐藏、重命名；拖动上方分隔条调整高度。";
-            hint.Location = new Point(2, 56);
-            hint.Size = new Size(280, 28);
+            hint.Location = new Point(2, 82);
+            hint.Size = new Size(280, 30);
             hint.ForeColor = Color.FromArgb(80, 80, 80);
             bottom.Controls.Add(hint);
 
@@ -306,6 +322,24 @@ namespace ImageToolbox
             RaiseProps();
         }
 
+        private void ChangeLockTransparent()
+        {
+            if (_updating || _session == null) { return; }
+            EditLayer layer = _session.ActiveLayer;
+            if (layer == null) { return; }
+            _session.SetLockTransparent(layer, _lockTransparent.Checked, "锁定透明像素");
+            RaiseProps();   // 让当前操作的预览按新锁重新计算
+        }
+
+        private void ChangeLockImage()
+        {
+            if (_updating || _session == null) { return; }
+            EditLayer layer = _session.ActiveLayer;
+            if (layer == null) { return; }
+            _session.SetLockImage(layer, _lockImage.Checked, "锁定图像像素");
+            RaiseProps();   // 让当前操作的预览按新锁重新计算
+        }
+
         public void Sync()
         {
             _updating = true;
@@ -334,14 +368,22 @@ namespace ImageToolbox
             bool has = layer != null;
             _mode.Enabled = has;
             _opacity.Enabled = has;
+            _lockTransparent.Enabled = has;
+            _lockImage.Enabled = has;
             if (!has)
             {
                 _opacityV.Text = "";
+                _updating = true;
+                _lockTransparent.Checked = false;
+                _lockImage.Checked = false;
+                _updating = false;
                 return;
             }
             _updating = true;
             _mode.SelectedIndex = (int)layer.Mode;
             _opacity.Value = (int)Math.Round(layer.Opacity * 100f);
+            _lockTransparent.Checked = layer.LockTransparent;
+            _lockImage.Checked = layer.LockImage;
             _updating = false;
             _opacityV.Text = _opacity.Value + "%";
         }
