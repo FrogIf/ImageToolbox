@@ -15,6 +15,7 @@ namespace ImageToolbox
 
         private readonly EditSession _session = new EditSession();
         private readonly EditOpPanel[] _ops;
+        private SelectionOp _selectionOp;   // 选区（用于跨功能保持选区轮廓）
         private ListBox _list;
         private Panel _opHost;
         private LayerPanel _layerPanel;
@@ -30,6 +31,7 @@ namespace ImageToolbox
         private Label _status;
         private Timer _previewTimer;
         private Timer _liveTimer;
+        private Timer _antsTimer;   // 选区蚂蚁线动画（跨功能持续）
         private bool _livePending;
 
         private int _active = -1;
@@ -70,6 +72,11 @@ namespace ImageToolbox
                 new SliceCollageOp(),
                 new CompareOp()
             };
+            for (int i = 0; i < _ops.Length; i++)
+            {
+                SelectionOp so = _ops[i] as SelectionOp;
+                if (so != null) { _selectionOp = so; break; }
+            }
 
             // 作为 MainForm 的子控件：用 Inherit，由顶层窗体的 DPI 缩放统一处理，
             // 自身再设 Dpi 会在高 DPI 下被缩放两次（布局错乱）。
@@ -86,6 +93,7 @@ namespace ImageToolbox
 
         public override void Shutdown()
         {
+            if (_antsTimer != null) { _antsTimer.Stop(); _antsTimer.Dispose(); _antsTimer = null; }
             if (_canvas != null) { _canvas.SetImage(null); }
             _displayImage = null;
             for (int i = 0; i < _ops.Length; i++)
@@ -290,6 +298,13 @@ namespace ImageToolbox
             _liveTimer.Interval = 15;
             _liveTimer.Tick += delegate { _liveTimer.Stop(); _livePending = false; ComputePreview(); };
 
+            // 选区蚂蚁线：110ms 推进一次相位并重绘画布；只要存在选区就一直流动
+            // （即使当前不是「选区」功能，画布叠加层也会补画选区轮廓）。
+            _antsTimer = new Timer();
+            _antsTimer.Interval = 110;
+            _antsTimer.Tick += delegate { OnAntsTick(); };
+            _antsTimer.Start();
+
             UpdateButtons();
 
             if (_list.Items.Count > 0)
@@ -405,6 +420,7 @@ namespace ImageToolbox
             }
             _displayImage = null;
             _opDirty = false;
+            if (_selectionOp != null) { _selectionOp.ClearSelection(); }
         }
 
         private void CaptureEntrySnapshot()
@@ -531,11 +547,11 @@ namespace ImageToolbox
                         _canvas.DragEnabled = true;
                     }
                     // 交互式变换框：把叠加绘制与悬停光标交给当前操作。
-                    _canvas.OverlayPainter = null;
+                    Action<Graphics> activeOverlay = null;
                     _canvas.CursorProvider = null;
                     if (_ops[_active].WantsTransformBox)
                     {
-                        _canvas.OverlayPainter = delegate(Graphics g)
+                        activeOverlay = delegate(Graphics g)
                         {
                             if (_active >= 0 && _active < _ops.Length) { _ops[_active].PaintCanvasOverlay(g, LayerToClient); }
                         };
@@ -545,6 +561,17 @@ namespace ImageToolbox
                             return _ops[_active].TransformCursor(ToLayer(ToSession(disp)));
                         };
                     }
+                    // 选区跨功能保留：当前操作不是选区时，由编辑器补画选区轮廓（蚂蚁线）。
+                    Action<Graphics> overlay = activeOverlay;
+                    _canvas.OverlayPainter = delegate(Graphics g)
+                    {
+                        if (overlay != null) { overlay(g); }
+                        if (_selectionOp != null && _active >= 0 && _active < _ops.Length &&
+                            _ops[_active] != _selectionOp && _session.HasImage)
+                        {
+                            _selectionOp.PaintSelection(g, LayerToClient, _session.Width, _session.Height);
+                        }
+                    };
                     _previewTimer.Stop();
                     _liveTimer.Stop();
                     _livePending = false;
@@ -661,6 +688,17 @@ namespace ImageToolbox
             _previewTimer.Start();
         }
 
+        // 蚂蚁线动画：仅在存在选区时推进相位并重绘画布。
+        private void OnAntsTick()
+        {
+            if (_canvas == null || _selectionOp == null || !_selectionOp.HasSelection || !_session.HasImage)
+            {
+                return;
+            }
+            _selectionOp.AdvanceAnts();
+            _canvas.Invalidate();
+        }
+
         private void ComputePreview()
         {
             if (_active < 0 || _active >= _ops.Length || !_session.HasImage)
@@ -697,6 +735,14 @@ namespace ImageToolbox
                     {
                         EditSession.ApplyAlphaLock(opPreview, _previewSource);
                     }
+                }
+
+                // 选区约束：这些操作只在选区内生效（选区外用原图层像素）。
+                if (!documentLevel && _ops[_active].RespectsSelection && opPreview != null && _previewSource != null &&
+                    _selectionOp != null && opPreview.Width == _previewSource.Width && opPreview.Height == _previewSource.Height)
+                {
+                    byte[] selMask = _selectionOp.PreviewMask(opPreview.Width, opPreview.Height);
+                    if (selMask != null) { ImageSelection.BlendMasked(opPreview, _previewSource, selMask); }
                 }
 
                 bool disposeOp = opPreview != null && !_ops[_active].ReusablePreview;
@@ -965,6 +1011,16 @@ namespace ImageToolbox
                 {
                     _status.Text = "当前操作没有可应用的结果（如未取样/未框选，或为查看类）";
                     return false;
+                }
+                // 选区约束：只在选区内生效，选区外保持原图层像素。
+                if (!_ops[_active].DocumentLevel && !newLayer && _ops[_active].RespectsSelection && _selectionOp != null)
+                {
+                    EditLayer layer = _session.ActiveLayer;
+                    byte[] selMask = _selectionOp.EffectiveMask();
+                    if (layer != null && layer.Image != null && selMask != null)
+                    {
+                        ImageSelection.BlendMasked(result, layer.Image, selMask);
+                    }
                 }
                 if (_ops[_active].DocumentLevel)
                 {

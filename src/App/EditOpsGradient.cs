@@ -136,6 +136,12 @@ namespace ImageToolbox
             get { return _hasGradient; }
         }
 
+        // 有选区时只在选区内生效。
+        public override bool RespectsSelection
+        {
+            get { return true; }
+        }
+
         protected override void OnResetState()
         {
             // 只清掉“已拖出的渐变”，保留用户调好的颜色/中间色，方便连续使用。

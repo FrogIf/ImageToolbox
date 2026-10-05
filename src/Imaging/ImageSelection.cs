@@ -61,6 +61,50 @@ namespace ImageToolbox
             return mask;
         }
 
+        // 把 edited 按 mask(0..255) 混回 original（两者同尺寸）：mask=0 用 original、255 用 edited、中间线性插值。
+        // 就地写回 edited；用于「有选区时操作只对选区内生效」。
+        public static void BlendMasked(Bitmap edited, Bitmap original, byte[] mask)
+        {
+            if (edited == null || original == null || mask == null) { return; }
+            int w = edited.Width, h = edited.Height;
+            if (original.Width != w || original.Height != h || mask.Length != w * h) { return; }
+            BitmapData ed = edited.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+            BitmapData od = original.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                int es = ed.Stride, os = od.Stride;
+                byte[] eb = new byte[es * h];
+                byte[] ob = new byte[os * h];
+                Marshal.Copy(ed.Scan0, eb, 0, eb.Length);
+                Marshal.Copy(od.Scan0, ob, 0, ob.Length);
+                for (int y = 0; y < h; y++)
+                {
+                    int eo = y * es, oo = y * os, mo = y * w;
+                    for (int x = 0; x < w; x++)
+                    {
+                        int m = mask[mo + x];
+                        if (m == 255) { continue; }
+                        int i = eo + x * 4, j = oo + x * 4;
+                        if (m == 0)
+                        {
+                            eb[i] = ob[j]; eb[i + 1] = ob[j + 1]; eb[i + 2] = ob[j + 2]; eb[i + 3] = ob[j + 3];
+                            continue;
+                        }
+                        eb[i] = (byte)(ob[j] + (eb[i] - ob[j]) * m / 255);
+                        eb[i + 1] = (byte)(ob[j + 1] + (eb[i + 1] - ob[j + 1]) * m / 255);
+                        eb[i + 2] = (byte)(ob[j + 2] + (eb[i + 2] - ob[j + 2]) * m / 255);
+                        eb[i + 3] = (byte)(ob[j + 3] + (eb[i + 3] - ob[j + 3]) * m / 255);
+                    }
+                }
+                Marshal.Copy(eb, 0, ed.Scan0, eb.Length);
+            }
+            finally
+            {
+                edited.UnlockBits(ed);
+                original.UnlockBits(od);
+            }
+        }
+
         // mode: 0 新建（覆盖）, 1 加选, 2 减选, 3 交集。shape 为整图大小的 0/255 覆盖。
         public void Combine(byte[] shape, int mode)
         {

@@ -215,6 +215,12 @@ namespace ImageToolbox
             get { return _strokes.Count > 0 || _current != null || _effect != null; }
         }
 
+        // 有选区时只在选区内绘制。
+        public override bool RespectsSelection
+        {
+            get { return true; }
+        }
+
         protected override void OnActivate()
         {
             if (Canvas != null)

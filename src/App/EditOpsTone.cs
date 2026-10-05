@@ -174,6 +174,12 @@ namespace ImageToolbox
             get { return _exposure.Value != 0 || _contrast.Value != 0 || _sat.Value != 0; }
         }
 
+        // 有选区时只在选区内生效。
+        public override bool RespectsSelection
+        {
+            get { return true; }
+        }
+
         private TuningState State()
         {
             TuningState s = new TuningState();

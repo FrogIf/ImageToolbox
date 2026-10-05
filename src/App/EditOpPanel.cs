@@ -90,6 +90,13 @@ namespace ImageToolbox
             get { return null; }
         }
 
+        // true 表示存在选区时，本操作的结果只作用于选区内（选区外保持原样）。
+        // 编辑器在预览与「应用到图片」时把结果按选区遮罩混回原图层。
+        public virtual bool RespectsSelection
+        {
+            get { return false; }
+        }
+
         public virtual string Hint
         {
             get { return ""; }

@@ -353,6 +353,12 @@ namespace ImageToolbox
             get { return ((string)_preset.SelectedItem) != "原图" && _strength.Value > 0; }
         }
 
+        // 有选区时只在选区内生效。
+        public override bool RespectsSelection
+        {
+            get { return true; }
+        }
+
         private ColorMatrix Matrix()
         {
             string name = (string)_preset.SelectedItem;
@@ -413,6 +419,12 @@ namespace ImageToolbox
         public override bool HasPendingResult
         {
             get { return _effect.SelectedIndex != 0; }
+        }
+
+        // 有选区时只在选区内生效。
+        public override bool RespectsSelection
+        {
+            get { return true; }
         }
 
         private void Configure()

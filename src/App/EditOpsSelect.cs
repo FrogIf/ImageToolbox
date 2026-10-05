@@ -52,7 +52,16 @@ namespace ImageToolbox
         private int[] _outline;
         private int _outlineVersion = -1;
         private int _antPhase;
-        private Timer _ants;
+
+        // 选区遮罩缓存（按 _version / 羽化 / 尺寸）：供其它操作在预览与应用时限制作用范围。
+        private byte[] _effMask;
+        private int _effMaskVersion = -1;
+        private int _effMaskFeather = -1;
+        private byte[] _previewMask;
+        private int _previewMaskVersion = -1;
+        private int _previewMaskFeather = -1;
+        private int _previewMaskW = -1;
+        private int _previewMaskH = -1;
 
         private Bitmap _clipboard;
 
@@ -105,10 +114,6 @@ namespace ImageToolbox
             EditOpUi.Button(this, "清除路径", 138, 376, 118, delegate { CancelPath(); });
 
             EditOpUi.Note(this, "矩形/圆形拖动框选；画笔涂抹；套索按住拖动；多边形逐点单击、双击或点回起点闭合；磁性套索沿边缘拖动自动吸附，磁力控制吸附范围；方式选「选择不透明」时按当前图层 alpha 选中已有像素（轮廓）。运算控制与已有选区的合并方式。删除/填充/贴入会立即作用到当前图层；复制会新建一个图层并放入选中内容（同时写入剪贴板，可再「贴入」）。羽化在应用时生效。", 416, 120);
-
-            _ants = new Timer();
-            _ants.Interval = 110;
-            _ants.Tick += delegate { _antPhase++; if (Canvas != null && Canvas.Visible) { Canvas.Invalidate(); } };
         }
 
         public override bool CanApply
@@ -171,22 +176,65 @@ namespace ImageToolbox
         {
             EnsureSelection();
             ApplyCanvasMode();
-            if (_ants != null) { _ants.Start(); }
         }
 
-        protected override void OnDeactivate()
+        // 蚂蚁线动画由编辑器统一驱动（切到别的功能后也继续流动）。
+        public void AdvanceAnts()
         {
-            if (_ants != null) { _ants.Stop(); }
+            _antPhase++;
+        }
+
+        public bool HasSelection
+        {
+            get { return _sel != null && !_sel.IsEmpty; }
+        }
+
+        // 全分辨率的有效选区遮罩（含羽化），无选区返回 null。带缓存，供每个预览帧复用。
+        public byte[] EffectiveMask()
+        {
+            if (_sel == null || _sel.IsEmpty) { return null; }
+            if (_effMask != null && _effMaskVersion == _version && _effMaskFeather == _featherPx) { return _effMask; }
+            _effMask = _sel.EffectiveMask(_featherPx);
+            _effMaskVersion = _version;
+            _effMaskFeather = _featherPx;
+            return _effMask;
+        }
+
+        // 预览分辨率（w×h）的选区遮罩：把全分辨率有效遮罩最近邻采样到目标尺寸，带缓存。
+        public byte[] PreviewMask(int w, int h)
+        {
+            byte[] full = EffectiveMask();
+            if (full == null || w < 1 || h < 1) { return null; }
+            if (_previewMask != null && _previewMaskVersion == _version && _previewMaskFeather == _featherPx &&
+                _previewMaskW == w && _previewMaskH == h) { return _previewMask; }
+            int sw = _sel.Width, sh = _sel.Height;
+            byte[] small = new byte[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                int sy = (int)((long)y * sh / h);
+                if (sy >= sh) { sy = sh - 1; }
+                int srow = sy * sw, drow = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    int sx = (int)((long)x * sw / w);
+                    if (sx >= sw) { sx = sw - 1; }
+                    small[drow + x] = full[srow + sx];
+                }
+            }
+            _previewMask = small;
+            _previewMaskVersion = _version;
+            _previewMaskFeather = _featherPx;
+            _previewMaskW = w;
+            _previewMaskH = h;
+            return small;
         }
 
         protected override void OnDetach()
         {
-            _sel = null;
+            // 选区跨功能保留：不清 _sel/_outline，切回来仍是同一选区（编辑器也会在别的功能下补画蚂蚁线）；
+            // 只清掉正在进行的路径。
             _poly = null;
             _free = null;
-            _outline = null;
-            _outlineVersion = -1;
-            _version = 0;
         }
 
         public override void DisposeResources()
@@ -798,33 +846,52 @@ namespace ImageToolbox
 
         // ---- 叠加绘制 ----
 
+        // 供编辑器在切到别的功能后仍绘制选区轮廓（保持选区可见）。
+        public void PaintSelection(Graphics g, Func<PointF, PointF> map, int docW, int docH)
+        {
+            if (_sel == null || _sel.IsEmpty || _sel.Width != docW || _sel.Height != docH) { return; }
+            PaintAnts(g, map);
+        }
+
+        // 打开/新建图片时清掉选区。
+        public void ClearSelection()
+        {
+            if (_sel == null) { return; }
+            _sel.Clear();
+            _version++;
+            _outline = null;
+            _outlineVersion = -1;
+        }
+
+        private void PaintAnts(Graphics g, Func<PointF, PointF> map)
+        {
+            EnsureOutline();
+            if (_outline == null || _outline.Length == 0) { return; }
+            using (GraphicsPath path = new GraphicsPath())
+            {
+                for (int i = 0; i + 3 < _outline.Length; i += 4)
+                {
+                    PointF a = map(new PointF(_outline[i], _outline[i + 1]));
+                    PointF b = map(new PointF(_outline[i + 2], _outline[i + 3]));
+                    path.StartFigure();
+                    path.AddLine(a, b);
+                }
+                using (Pen black = new Pen(Color.FromArgb(210, 0, 0, 0), 1f))
+                using (Pen white = new Pen(Color.White, 1f))
+                {
+                    white.DashStyle = DashStyle.Dash;
+                    white.DashPattern = new float[] { 4f, 4f };
+                    white.DashOffset = _antPhase % 8;
+                    g.DrawPath(black, path);
+                    g.DrawPath(white, path);
+                }
+            }
+        }
+
         public override void PaintCanvasOverlay(Graphics g, Func<PointF, PointF> map)
         {
             if (Source == null) { return; }
-            EnsureOutline();
-
-            if (_outline != null && _outline.Length > 0)
-            {
-                using (GraphicsPath path = new GraphicsPath())
-                {
-                    for (int i = 0; i + 3 < _outline.Length; i += 4)
-                    {
-                        PointF a = map(new PointF(_outline[i], _outline[i + 1]));
-                        PointF b = map(new PointF(_outline[i + 2], _outline[i + 3]));
-                        path.StartFigure();
-                        path.AddLine(a, b);
-                    }
-                    using (Pen black = new Pen(Color.FromArgb(210, 0, 0, 0), 1f))
-                    using (Pen white = new Pen(Color.White, 1f))
-                    {
-                        white.DashStyle = DashStyle.Dash;
-                        white.DashPattern = new float[] { 4f, 4f };
-                        white.DashOffset = _antPhase % 8;
-                        g.DrawPath(black, path);
-                        g.DrawPath(white, path);
-                    }
-                }
-            }
+            PaintAnts(g, map);
 
             int t = _tool.SelectedIndex;
             if (_dragging && (t == ToolRect || t == ToolEllipse))
