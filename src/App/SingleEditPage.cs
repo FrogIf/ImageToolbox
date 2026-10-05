@@ -63,6 +63,7 @@ namespace ImageToolbox
                 new LocalMaskOp(),
                 new StyleOp(),
                 new EffectsOp(),
+                new GradientOp(),
                 new ColorMatchOp(),
                 new ColorToolOp(),
                 new IdPhotoOp(),
@@ -271,8 +272,8 @@ namespace ImageToolbox
             string[] names =
             {
                 "图片信息", "绘画标注", "变换", "抠图", "选区", "裁剪 / 旋转",
-                "局部覆盖", "调色", "局部调整", "风格预设", "特效", "取色配色",
-                "颜色工具", "证件照", "切图拼图", "图像对比"
+                "局部覆盖", "调色", "局部调整", "风格预设", "特效", "渐变",
+                "取色配色", "颜色工具", "证件照", "切图拼图", "图像对比"
             };
             for (int i = 0; i < names.Length; i++)
             {
