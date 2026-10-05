@@ -80,9 +80,16 @@ namespace ImageToolbox
             BitmapData data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
             try
             {
-                for (int y = 0; y < h; y++)
+                if (data.Stride == w * 4)
                 {
-                    Marshal.Copy(buf, y * data.Stride, (IntPtr)(data.Scan0.ToInt64() + (long)y * data.Stride), data.Stride);
+                    Marshal.Copy(buf, 0, data.Scan0, w * 4 * h);
+                }
+                else
+                {
+                    for (int y = 0; y < h; y++)
+                    {
+                        Marshal.Copy(buf, y * data.Stride, (IntPtr)(data.Scan0.ToInt64() + (long)y * data.Stride), data.Stride);
+                    }
                 }
             }
             finally
@@ -165,14 +172,6 @@ namespace ImageToolbox
                 return;
             }
 
-            int r = Math.Max(1, radius / 3);
-            BoxBlur(bmp, r);
-            BoxBlur(bmp, r);
-            BoxBlur(bmp, r);
-        }
-
-        private static void BoxBlur(Bitmap bmp, int radius)
-        {
             int w = bmp.Width;
             int h = bmp.Height;
             if (w < 1 || h < 1)
@@ -180,16 +179,30 @@ namespace ImageToolbox
                 return;
             }
 
-            int r = Math.Max(1, radius);
-            int win = 2 * r + 1;
-
+            int r = Math.Max(1, radius / 3);
             BitmapData data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
             try
             {
                 int stride = data.Stride;
+                // 三次盒式模糊共用同一组缓冲：只锁/拷入一次、拷出一次，避免每遍都整图读写一遍。
                 byte[] src = new byte[stride * h];
-                Marshal.Copy(data.Scan0, src, 0, src.Length);
                 byte[] tmp = new byte[src.Length];
+                Marshal.Copy(data.Scan0, src, 0, src.Length);
+                BoxBlurBuffer(src, tmp, w, h, stride, r);
+                BoxBlurBuffer(src, tmp, w, h, stride, r);
+                BoxBlurBuffer(src, tmp, w, h, stride, r);
+                Marshal.Copy(src, 0, data.Scan0, src.Length);
+            }
+            finally
+            {
+                bmp.UnlockBits(data);
+            }
+        }
+
+        // 对内存缓冲做一次盒式模糊（先水平写到 tmp，再垂直写回 src）。
+        private static void BoxBlurBuffer(byte[] src, byte[] tmp, int w, int h, int stride, int r)
+        {
+            int win = 2 * r + 1;
 
                 for (int y = 0; y < h; y++)
                 {
@@ -223,43 +236,59 @@ namespace ImageToolbox
                     }
                 }
 
-                for (int x = 0; x < w; x++)
+                // 竖直方向按列分块（每块 64 列）：块内逐行访问连续内存，行窗口可复用，
+                // 避免原来「逐列跨行」导致的每个像素都命中新缓存行（大图滤镜的主要瓶颈）。
+                const int block = 64;
+                int[] sB = new int[block];
+                int[] sG = new int[block];
+                int[] sR = new int[block];
+                int[] sA = new int[block];
+                for (int x0 = 0; x0 < w; x0 += block)
                 {
-                    int sa = 0, sr = 0, sg = 0, sb = 0;
-                    for (int k = -r; k <= r; k++)
+                    int bn = Math.Min(block, w - x0);
+                    for (int c = 0; c < bn; c++)
                     {
-                        int yy = Clamp(k, 0, h - 1);
-                        int i = yy * stride + x * 4;
-                        sb += tmp[i];
-                        sg += tmp[i + 1];
-                        sr += tmp[i + 2];
-                        sa += tmp[i + 3];
+                        int x = x0 + c;
+                        int accB = 0, accG = 0, accR = 0, accA = 0;
+                        for (int k = -r; k <= r; k++)
+                        {
+                            int yy = Clamp(k, 0, h - 1);
+                            int i = yy * stride + x * 4;
+                            accB += tmp[i];
+                            accG += tmp[i + 1];
+                            accR += tmp[i + 2];
+                            accA += tmp[i + 3];
+                        }
+                        sB[c] = accB; sG[c] = accG; sR[c] = accR; sA[c] = accA;
                     }
                     for (int y = 0; y < h; y++)
                     {
-                        int o = y * stride + x * 4;
-                        src[o] = (byte)(sb / win);
-                        src[o + 1] = (byte)(sg / win);
-                        src[o + 2] = (byte)(sr / win);
-                        src[o + 3] = (byte)(sa / win);
+                        int row = y * stride;
+                        for (int c = 0; c < bn; c++)
+                        {
+                            int o = row + (x0 + c) * 4;
+                            src[o] = (byte)(sB[c] / win);
+                            src[o + 1] = (byte)(sG[c] / win);
+                            src[o + 2] = (byte)(sR[c] / win);
+                            src[o + 3] = (byte)(sA[c] / win);
+                        }
 
                         int yt = Clamp(y - r, 0, h - 1);
-                        int iT = yt * stride + x * 4;
                         int yb = Clamp(y + r + 1, 0, h - 1);
-                        int iB = yb * stride + x * 4;
-                        sb += tmp[iB] - tmp[iT];
-                        sg += tmp[iB + 1] - tmp[iT + 1];
-                        sr += tmp[iB + 2] - tmp[iT + 2];
-                        sa += tmp[iB + 3] - tmp[iT + 3];
+                        int rowT = yt * stride;
+                        int rowB = yb * stride;
+                        for (int c = 0; c < bn; c++)
+                        {
+                            int x = x0 + c;
+                            int iT = rowT + x * 4;
+                            int iB = rowB + x * 4;
+                            sB[c] += tmp[iB] - tmp[iT];
+                            sG[c] += tmp[iB + 1] - tmp[iT + 1];
+                            sR[c] += tmp[iB + 2] - tmp[iT + 2];
+                            sA[c] += tmp[iB + 3] - tmp[iT + 3];
+                        }
                     }
                 }
-
-                Marshal.Copy(src, 0, data.Scan0, src.Length);
-            }
-            finally
-            {
-                bmp.UnlockBits(data);
-            }
         }
 
         public static void MotionBlur(Bitmap bmp, int length, double angleDeg)
@@ -342,60 +371,49 @@ namespace ImageToolbox
                 int[] sg = new int[levels];
                 int[] sb = new int[levels];
                 int[] sa = new int[levels];
+                int[] touched = new int[levels];
+                bool[] inTouch = new bool[levels];
 
+                // 逐行滑动窗口：每行只在 x 方向增删一列（高度 2r+1），把每像素 O((2r+1)^2 + levels)
+                // 降到 O(2*(2r+1) + levels)。同时只扫描/清零“用到的 bin”（touched），避免每像素清空 levels 数组。
                 for (int y = 0; y < h; y++)
                 {
                     int y0 = Math.Max(0, y - radius);
                     int y1 = Math.Min(h - 1, y + radius);
+                    int nt = 0;
+                    for (int k = 0; k < levels; k++)
+                    {
+                        count[k] = 0; sr[k] = 0; sg[k] = 0; sb[k] = 0; sa[k] = 0; inTouch[k] = false;
+                    }
+
+                    int initCols = Math.Min(radius, w - 1);
+                    for (int yy = y0; yy <= y1; yy++)
+                    {
+                        int row = yy * stride;
+                        for (int xx = 0; xx <= initCols; xx++)
+                        {
+                            int i = row + xx * 4;
+                            int b = src[i], g = src[i + 1], r = src[i + 2];
+                            int bin = ((r * 77 + g * 151 + b * 28) >> 8) * levels / 256;
+                            if (bin >= levels) { bin = levels - 1; }
+                            if (count[bin] == 0) { touched[nt++] = bin; inTouch[bin] = true; }
+                            count[bin]++; sb[bin] += b; sg[bin] += g; sr[bin] += r; sa[bin] += src[i + 3];
+                        }
+                    }
+
                     for (int x = 0; x < w; x++)
                     {
-                        int x0 = Math.Max(0, x - radius);
-                        int x1 = Math.Min(w - 1, x + radius);
-                        for (int k = 0; k < levels; k++)
+                        int best = -1;
+                        for (int t = 0; t < nt; t++)
                         {
-                            count[k] = 0;
-                            sr[k] = 0;
-                            sg[k] = 0;
-                            sb[k] = 0;
-                            sa[k] = 0;
-                        }
-
-                        for (int yy = y0; yy <= y1; yy++)
-                        {
-                            int row = yy * stride;
-                            for (int xx = x0; xx <= x1; xx++)
-                            {
-                                int i = row + xx * 4;
-                                int b = src[i];
-                                int g = src[i + 1];
-                                int r = src[i + 2];
-                                int lum = (r * 77 + g * 151 + b * 28) >> 8;
-                                int bin = lum * levels / 256;
-                                if (bin >= levels) { bin = levels - 1; }
-                                count[bin]++;
-                                sb[bin] += b;
-                                sg[bin] += g;
-                                sr[bin] += r;
-                                sa[bin] += src[i + 3];
-                            }
-                        }
-
-                        int best = 0;
-                        for (int k = 1; k < levels; k++)
-                        {
-                            if (count[k] > count[best])
-                            {
-                                best = k;
-                            }
+                            int k = touched[t];
+                            if (best < 0 || count[k] > count[best] || (count[k] == count[best] && k < best)) { best = k; }
                         }
 
                         int o = y * stride + x * 4;
-                        if (count[best] == 0)
+                        if (best < 0 || count[best] == 0)
                         {
-                            dst[o] = src[o];
-                            dst[o + 1] = src[o + 1];
-                            dst[o + 2] = src[o + 2];
-                            dst[o + 3] = src[o + 3];
+                            dst[o] = src[o]; dst[o + 1] = src[o + 1]; dst[o + 2] = src[o + 2]; dst[o + 3] = src[o + 3];
                         }
                         else
                         {
@@ -403,6 +421,40 @@ namespace ImageToolbox
                             dst[o + 1] = (byte)(sg[best] / count[best]);
                             dst[o + 2] = (byte)(sr[best] / count[best]);
                             dst[o + 3] = (byte)(sa[best] / count[best]);
+                        }
+
+                        int addCol = x + radius + 1;
+                        if (addCol < w)
+                        {
+                            for (int yy = y0; yy <= y1; yy++)
+                            {
+                                int i = yy * stride + addCol * 4;
+                                int b = src[i], g = src[i + 1], r = src[i + 2];
+                                int bin = ((r * 77 + g * 151 + b * 28) >> 8) * levels / 256;
+                                if (bin >= levels) { bin = levels - 1; }
+                                if (count[bin] == 0) { touched[nt++] = bin; inTouch[bin] = true; }
+                                count[bin]++; sb[bin] += b; sg[bin] += g; sr[bin] += r; sa[bin] += src[i + 3];
+                            }
+                        }
+                        int remCol = x - radius;
+                        if (remCol >= 0)
+                        {
+                            for (int yy = y0; yy <= y1; yy++)
+                            {
+                                int i = yy * stride + remCol * 4;
+                                int b = src[i], g = src[i + 1], r = src[i + 2];
+                                int bin = ((r * 77 + g * 151 + b * 28) >> 8) * levels / 256;
+                                if (bin >= levels) { bin = levels - 1; }
+                                count[bin]--; sb[bin] -= b; sg[bin] -= g; sr[bin] -= r; sa[bin] -= src[i + 3];
+                                if (count[bin] == 0)
+                                {
+                                    inTouch[bin] = false;
+                                    for (int t = 0; t < nt; t++)
+                                    {
+                                        if (touched[t] == bin) { touched[t] = touched[--nt]; break; }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -333,6 +333,28 @@ namespace ImageToolbox
                 bool lutActive = s.LutEnabled && s.LutData != null && s.LutSize > 1;
                 float lutStrength = Clamp(s.LutStrength, 0f, 1f);
 
+                // 只做色阶/曲线（白平衡/HSL/色调/LUT 都未启用）时，逐通道查表即可：
+                // 走纯字节循环，避开每像素的浮点运算与四舍五入，是调色滑杆实时预览的主路径。
+                bool plainLut = !wbActive && !hslActive && !toneActive && !lutActive;
+                if (plainLut)
+                {
+                    byte[] lr = lut[0];
+                    byte[] lg = lut[1];
+                    byte[] lb = lut[2];
+                    for (int y = 0; y < h; y++)
+                    {
+                        int row = y * stride;
+                        for (int x = 0; x < w; x++)
+                        {
+                            int i = row + x * 4;
+                            output[i] = lb[input[i]];
+                            output[i + 1] = lg[input[i + 1]];
+                            output[i + 2] = lr[input[i + 2]];
+                            output[i + 3] = input[i + 3];
+                        }
+                    }
+                }
+                else
                 for (int y = 0; y < h; y++)
                 {
                     int row = y * stride;
@@ -350,36 +372,36 @@ namespace ImageToolbox
                             b *= gainB;
                         }
 
-                        r = lut[0][(int)Clamp(Math.Round(r), 0, 255)];
-                        g = lut[1][(int)Clamp(Math.Round(g), 0, 255)];
-                        b = lut[2][(int)Clamp(Math.Round(b), 0, 255)];
+                        r = lut[0][Round255(r)];
+                        g = lut[1][Round255(g)];
+                        b = lut[2][Round255(b)];
 
                         if (hslActive)
                         {
-                            double hh;
-                            double ss;
-                            double ll;
+                            float hh;
+                            float ss;
+                            float ll;
                             RgbToHsl(r, g, b, out hh, out ss, out ll);
-                            hh += s.Hue / 360.0;
+                            hh += s.Hue / 360f;
                             if (hh < 0) hh += 1;
                             if (hh >= 1) hh -= 1;
-                            ss = Clamp(ss * (1.0 + s.Saturation / 100.0), 0.0, 1.0);
-                            double lf = s.Lightness / 100.0;
+                            ss = Clamp(ss * (1f + s.Saturation / 100f), 0f, 1f);
+                            float lf = s.Lightness / 100f;
                             if (lf >= 0)
                             {
-                                ll = ll + (1.0 - ll) * lf;
+                                ll = ll + (1f - ll) * lf;
                             }
                             else
                             {
-                                ll = ll * (1.0 + lf);
+                                ll = ll * (1f + lf);
                             }
-                            double nr;
-                            double ng;
-                            double nb;
+                            float nr;
+                            float ng;
+                            float nb;
                             HslToRgb(hh, ss, ll, out nr, out ng, out nb);
-                            r = (float)(nr * 255.0);
-                            g = (float)(ng * 255.0);
-                            b = (float)(nb * 255.0);
+                            r = nr * 255f;
+                            g = ng * 255f;
+                            b = nb * 255f;
                         }
 
                         if (toneActive)
@@ -420,9 +442,9 @@ namespace ImageToolbox
                             b = b + (lb * 255f - b) * lutStrength;
                         }
 
-                        output[i] = (byte)Clamp(Math.Round(b), 0, 255);
-                        output[i + 1] = (byte)Clamp(Math.Round(g), 0, 255);
-                        output[i + 2] = (byte)Clamp(Math.Round(r), 0, 255);
+                        output[i] = (byte)Round255(b);
+                        output[i + 1] = (byte)Round255(g);
+                        output[i + 2] = (byte)Round255(r);
                         output[i + 3] = input[i + 3];
                     }
                 }
@@ -511,9 +533,9 @@ namespace ImageToolbox
                     g = g + (ng - g) * mask;
                     b = b + (nb - b) * mask;
 
-                    buffer[i] = (byte)Clamp(Math.Round(b), 0, 255);
-                    buffer[i + 1] = (byte)Clamp(Math.Round(g), 0, 255);
-                    buffer[i + 2] = (byte)Clamp(Math.Round(r), 0, 255);
+                    buffer[i] = (byte)Round255(b);
+                    buffer[i + 1] = (byte)Round255(g);
+                    buffer[i + 2] = (byte)Round255(r);
                 }
             }
         }
@@ -572,64 +594,66 @@ namespace ImageToolbox
             return Color.FromArgb(r, g, bl);
         }
 
-        private static void RgbToHsl(float r, float g, float b, out double h, out double s, out double l)
+        // HSL 转换是调色逐像素热路径：用 float（而非 double）可省去大量双精度运算，
+        // 结果肉眼无差别。
+        private static void RgbToHsl(float r, float g, float b, out float h, out float s, out float l)
         {
-            double rd = r / 255.0;
-            double gd = g / 255.0;
-            double bd = b / 255.0;
-            double max = Math.Max(rd, Math.Max(gd, bd));
-            double min = Math.Min(rd, Math.Min(gd, bd));
-            l = (max + min) / 2.0;
-            double delta = max - min;
-            if (delta < 1e-6)
+            float rd = r * (1f / 255f);
+            float gd = g * (1f / 255f);
+            float bd = b * (1f / 255f);
+            float max = Math.Max(rd, Math.Max(gd, bd));
+            float min = Math.Min(rd, Math.Min(gd, bd));
+            l = (max + min) * 0.5f;
+            float delta = max - min;
+            if (delta < 1e-6f)
             {
                 h = 0;
                 s = 0;
                 return;
             }
-            s = l > 0.5 ? delta / (2.0 - max - min) : delta / (max + min);
+            s = l > 0.5f ? delta / (2f - max - min) : delta / (max + min);
             if (max == rd)
             {
-                h = (gd - bd) / delta + (gd < bd ? 6.0 : 0.0);
+                h = (gd - bd) / delta + (gd < bd ? 6f : 0f);
             }
             else if (max == gd)
             {
-                h = (bd - rd) / delta + 2.0;
+                h = (bd - rd) / delta + 2f;
             }
             else
             {
-                h = (rd - gd) / delta + 4.0;
+                h = (rd - gd) / delta + 4f;
             }
-            h /= 6.0;
+            h /= 6f;
             if (h < 0)
             {
-                h += 1.0;
+                h += 1f;
             }
         }
 
-        private static void HslToRgb(double h, double s, double l, out double r, out double g, out double b)
+        private static void HslToRgb(float h, float s, float l, out float r, out float g, out float b)
         {
-            if (s < 1e-6)
+            if (s < 1e-6f)
             {
                 r = l;
                 g = l;
                 b = l;
                 return;
             }
-            double q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-            double p = 2 * l - q;
-            r = HueToRgb(p, q, h + 1.0 / 3.0);
+            float q = l < 0.5f ? l * (1f + s) : l + s - l * s;
+            float p = 2f * l - q;
+            r = HueToRgb(p, q, h + 1f / 3f);
             g = HueToRgb(p, q, h);
-            b = HueToRgb(p, q, h - 1.0 / 3.0);
+            b = HueToRgb(p, q, h - 1f / 3f);
         }
 
-        private static double HueToRgb(double p, double q, double t)
+        private static float HueToRgb(float p, float q, float t)
         {
             if (t < 0) t += 1;
             if (t > 1) t -= 1;
-            if (t < 1.0 / 6.0) return p + (q - p) * 6 * t;
-            if (t < 1.0 / 2.0) return q;
-            if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6;
+            if (t < 1f / 6f) return p + (q - p) * 6f * t;
+            if (t < 1f / 2f) return q;
+            if (t < 2f / 3f) return p + (q - p) * (2f / 3f - t) * 6f;
             return p;
         }
 
@@ -740,6 +764,14 @@ namespace ImageToolbox
             if (value < min) return min;
             if (value > max) return max;
             return value;
+        }
+
+        // 四舍五入到 0..255 的整数：替代逐像素的 Math.Round(double)+Clamp(double)。
+        private static int Round255(float v)
+        {
+            if (v <= 0f) { return 0; }
+            if (v >= 255f) { return 255; }
+            return (int)(v + 0.5f);
         }
     }
 }

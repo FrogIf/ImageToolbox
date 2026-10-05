@@ -186,18 +186,26 @@ namespace ImageToolbox
             BitmapData data = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
             try
             {
-                for (int y = 0; y < height; y++)
+                if (data.Stride == sourceStride)
                 {
-                    IntPtr destination;
-                    if (data.Stride >= 0)
+                    // 32bpp 位图 stride 恒为 width*4：整块一次拷贝，避免逐行 P/Invoke（大图加载明显更快）。
+                    Marshal.Copy(pixels, 0, data.Scan0, sourceStride * height);
+                }
+                else
+                {
+                    for (int y = 0; y < height; y++)
                     {
-                        destination = (IntPtr)(data.Scan0.ToInt64() + (long)y * data.Stride);
+                        IntPtr destination;
+                        if (data.Stride >= 0)
+                        {
+                            destination = (IntPtr)(data.Scan0.ToInt64() + (long)y * data.Stride);
+                        }
+                        else
+                        {
+                            destination = (IntPtr)(data.Scan0.ToInt64() + (long)(height - 1 - y) * (-data.Stride));
+                        }
+                        Marshal.Copy(pixels, y * sourceStride, destination, sourceStride);
                     }
-                    else
-                    {
-                        destination = (IntPtr)(data.Scan0.ToInt64() + (long)(height - 1 - y) * (-data.Stride));
-                    }
-                    Marshal.Copy(pixels, y * sourceStride, destination, sourceStride);
                 }
             }
             finally

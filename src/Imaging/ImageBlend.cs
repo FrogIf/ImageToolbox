@@ -59,11 +59,11 @@ namespace ImageToolbox
                 int astride = ad.Stride;
                 int ostride = od.Stride;
                 int rstride = rd.Stride;
-                byte[] abuf = new byte[astride * h];
-                byte[] obuf = new byte[ostride * h];
-                byte[] rbuf = new byte[rstride * h];
-                Marshal.Copy(ad.Scan0, abuf, 0, abuf.Length);
-                Marshal.Copy(od.Scan0, obuf, 0, obuf.Length);
+                byte[] abuf = EnsureBuffer(ref _blendAScratch, astride * h);
+                byte[] obuf = EnsureBuffer(ref _blendOScratch, ostride * h);
+                byte[] rbuf = EnsureBuffer(ref _blendRScratch, rstride * h);
+                Marshal.Copy(ad.Scan0, abuf, 0, astride * h);
+                Marshal.Copy(od.Scan0, obuf, 0, ostride * h);
 
                 for (int y = 0; y < h; y++)
                 {
@@ -83,7 +83,7 @@ namespace ImageToolbox
                     }
                 }
 
-                Marshal.Copy(rbuf, 0, rd.Scan0, rbuf.Length);
+                Marshal.Copy(rbuf, 0, rd.Scan0, rstride * h);
             }
             finally
             {
@@ -167,6 +167,11 @@ namespace ImageToolbox
                 Marshal.Copy(ad.Scan0, abuf, 0, astride * h);
                 Marshal.Copy(od.Scan0, obuf, 0, ostride * h);
 
+                // 普通模式（最常见的图层/盖印/拼合路径）走定点整数快路径：
+                // 覆盖 alpha 折成 0..255 后，为 255 直接拷贝；底图不透明时 out = over*a + base*(1-a)，
+                // 完全避开逐像素浮点除法与混合模式 switch。
+                bool fastNormal = (mode == BlendMode.Normal);
+                int op256 = fastNormal ? (int)(opacity * 256f + 0.5f) : 256;
                 for (int y = 0; y < h; y++)
                 {
                     int ao = y * astride;
@@ -175,7 +180,31 @@ namespace ImageToolbox
                     {
                         int i = ao + x * 4;
                         int j = oo + x * 4;
-                        float oa = (obuf[j + 3] / 255f) * opacity;
+                        int pA = obuf[j + 3];
+                        if (pA == 0) { continue; }
+                        if (fastNormal)
+                        {
+                            int oa255 = (pA * op256) >> 8;
+                            if (oa255 == 255)
+                            {
+                                abuf[i] = obuf[j];
+                                abuf[i + 1] = obuf[j + 1];
+                                abuf[i + 2] = obuf[j + 2];
+                                abuf[i + 3] = 255;
+                                continue;
+                            }
+                            // 覆盖 alpha 很小时（半透明叠加或低不透明度）折整会变成 0，仍需按精确浮点
+                            // 合成（底图也不透明时结果接近不变，但底图同样半透明时不能直接丢弃）。
+                            if (oa255 > 0 && abuf[i + 3] == 255)
+                            {
+                                int inv = 255 - oa255;
+                                abuf[i] = (byte)((obuf[j] * oa255 + abuf[i] * inv + 127) / 255);
+                                abuf[i + 1] = (byte)((obuf[j + 1] * oa255 + abuf[i + 1] * inv + 127) / 255);
+                                abuf[i + 2] = (byte)((obuf[j + 2] * oa255 + abuf[i + 2] * inv + 127) / 255);
+                                continue;
+                            }
+                        }
+                        float oa = (pA / 255f) * opacity;
                         if (oa <= 0f) { continue; }
                         float aoA = abuf[i + 3] / 255f;
                         float ra = oa + aoA * (1f - oa);
@@ -206,6 +235,9 @@ namespace ImageToolbox
 
         [ThreadStatic] private static byte[] _accScratch;
         [ThreadStatic] private static byte[] _overScratch;
+        [ThreadStatic] private static byte[] _blendAScratch;
+        [ThreadStatic] private static byte[] _blendOScratch;
+        [ThreadStatic] private static byte[] _blendRScratch;
 
         private static byte[] EnsureBuffer(ref byte[] buffer, int size)
         {
