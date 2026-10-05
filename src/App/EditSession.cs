@@ -25,7 +25,8 @@ namespace ImageToolbox
         private int _width;
         private int _height;
         private Bitmap _original;
-        private const int Limit = 16;
+        private string _rootLabel = "打开图片";   // 历史记录第 0 条（初始状态）的名称
+        private const int Limit = 50;
 
         public event EventHandler Changed;
 
@@ -85,7 +86,13 @@ namespace ImageToolbox
 
         public void SetOriginal(Bitmap image)
         {
+            SetOriginal(image, "打开图片");
+        }
+
+        public void SetOriginal(Bitmap image, string rootLabel)
+        {
             DisposeAll();
+            _rootLabel = string.IsNullOrEmpty(rootLabel) ? "打开图片" : rootLabel;
             _width = image.Width;
             _height = image.Height;
             _original = Register(ImageFilters.Clone(image));
@@ -96,6 +103,11 @@ namespace ImageToolbox
 
         public void CommitToActive(Bitmap result)
         {
+            CommitToActive(result, null);
+        }
+
+        public void CommitToActive(Bitmap result, string label)
+        {
             if (result == null) { return; }
             EditLayer layer = ActiveLayer;
             if (layer == null)
@@ -104,15 +116,20 @@ namespace ImageToolbox
             }
             if (result.Width != _width || result.Height != _height)
             {
-                CommitDocument(result);
+                CommitDocument(result, label);
                 return;
             }
             Bitmap before = layer.Image;
             layer.Image = Register(result);
-            Push(new PixelCommand(layer, before, result));
+            Push(new PixelCommand(layer, before, result), label);
         }
 
         public void CommitDocument(Bitmap result)
+        {
+            CommitDocument(result, null);
+        }
+
+        public void CommitDocument(Bitmap result, string label)
         {
             if (result == null) { return; }
             EditLayer layer = CreateLayer("背景", Register(result));
@@ -123,10 +140,15 @@ namespace ImageToolbox
                 _layers.Clear();
                 _layers.Add(layer);
                 _active = 0;
-            });
+            }, label);
         }
 
         public void AddImageLayer(Bitmap image, string name)
+        {
+            AddImageLayer(image, name, null);
+        }
+
+        public void AddImageLayer(Bitmap image, string name, string label)
         {
             if (image == null) { return; }
             if (!HasImage)
@@ -142,10 +164,15 @@ namespace ImageToolbox
             {
                 _layers.Insert(_active + 1, layer);
                 _active = _active + 1;
-            });
+            }, label);
         }
 
         public void AddBlankLayer(string name)
+        {
+            AddBlankLayer(name, null);
+        }
+
+        public void AddBlankLayer(string name, string label)
         {
             if (!HasImage) { return; }
             Bitmap blank = new Bitmap(_width, _height, PixelFormat.Format32bppArgb);
@@ -154,10 +181,15 @@ namespace ImageToolbox
             {
                 _layers.Insert(_active + 1, layer);
                 _active = _active + 1;
-            });
+            }, label);
         }
 
         public void DuplicateActive()
+        {
+            DuplicateActive(null);
+        }
+
+        public void DuplicateActive(string label)
         {
             EditLayer active = ActiveLayer;
             if (active == null) { return; }
@@ -169,7 +201,7 @@ namespace ImageToolbox
             {
                 _layers.Insert(_active + 1, copy);
                 _active = _active + 1;
-            });
+            }, label);
         }
 
         public bool CanRemoveActive
@@ -179,15 +211,25 @@ namespace ImageToolbox
 
         public void RemoveActive()
         {
+            RemoveActive(null);
+        }
+
+        public void RemoveActive(string label)
+        {
             if (!CanRemoveActive) { return; }
             CommitStructure(delegate
             {
                 _layers.RemoveAt(_active);
                 if (_active >= _layers.Count) { _active = _layers.Count - 1; }
-            });
+            }, label);
         }
 
         public void MoveActive(int delta)
+        {
+            MoveActive(delta, null);
+        }
+
+        public void MoveActive(int delta, string label)
         {
             int i = _active;
             int j = i + delta;
@@ -198,10 +240,15 @@ namespace ImageToolbox
                 _layers[i] = _layers[j];
                 _layers[j] = t;
                 _active = j;
-            });
+            }, label);
         }
 
         public void MergeDown()
+        {
+            MergeDown(null);
+        }
+
+        public void MergeDown(string label)
         {
             int i = _active;
             if (i <= 0 || i >= _layers.Count) { return; }
@@ -217,10 +264,15 @@ namespace ImageToolbox
             lower.Offset = Point.Empty;
             _layers.RemoveAt(i);
             _active = i - 1;
-            Push(new MergeDownCommand(lower, upper, before, beforeOffset, after, i - 1, i));
+            Push(new MergeDownCommand(lower, upper, before, beforeOffset, after, i - 1, i), label);
         }
 
         public void StampVisible()
+        {
+            StampVisible(null);
+        }
+
+        public void StampVisible(string label)
         {
             if (!HasImage) { return; }
             EditLayer layer = CreateLayer("盖印", Register(Composite()));
@@ -228,10 +280,15 @@ namespace ImageToolbox
             {
                 _layers.Insert(_active + 1, layer);
                 _active = _active + 1;
-            });
+            }, label);
         }
 
         public void Flatten()
+        {
+            Flatten(null);
+        }
+
+        public void Flatten(string label)
         {
             if (_layers.Count <= 1) { return; }
             EditLayer layer = CreateLayer("背景", Register(Composite()));
@@ -240,41 +297,66 @@ namespace ImageToolbox
                 _layers.Clear();
                 _layers.Add(layer);
                 _active = 0;
-            });
+            }, label);
         }
 
         public void SetVisible(EditLayer layer, bool visible)
         {
+            SetVisible(layer, visible, null);
+        }
+
+        public void SetVisible(EditLayer layer, bool visible, string label)
+        {
             if (layer == null || layer.Visible == visible) { return; }
-            PushProps(layer, delegate { layer.Visible = visible; });
+            PushProps(layer, delegate { layer.Visible = visible; }, label);
         }
 
         public void SetMode(EditLayer layer, BlendMode mode)
         {
+            SetMode(layer, mode, null);
+        }
+
+        public void SetMode(EditLayer layer, BlendMode mode, string label)
+        {
             if (layer == null || layer.Mode == mode) { return; }
-            PushProps(layer, delegate { layer.Mode = mode; });
+            PushProps(layer, delegate { layer.Mode = mode; }, label);
         }
 
         public void SetOpacity(EditLayer layer, float opacity)
         {
+            SetOpacity(layer, opacity, null);
+        }
+
+        public void SetOpacity(EditLayer layer, float opacity, string label)
+        {
             if (opacity < 0f) { opacity = 0f; }
             if (opacity > 1f) { opacity = 1f; }
             if (layer == null || layer.Opacity == opacity) { return; }
-            PushProps(layer, delegate { layer.Opacity = opacity; });
+            PushProps(layer, delegate { layer.Opacity = opacity; }, label);
         }
 
         public void CommitOffset(EditLayer layer, Point before)
         {
+            CommitOffset(layer, before, null);
+        }
+
+        public void CommitOffset(EditLayer layer, Point before, string label)
+        {
             if (layer == null) { return; }
             Point after = layer.Offset;
             if (before == after) { return; }
-            Push(new MoveCommand(layer, before, after));
+            Push(new MoveCommand(layer, before, after), label);
         }
 
         public void Rename(EditLayer layer, string name)
         {
+            Rename(layer, name, null);
+        }
+
+        public void Rename(EditLayer layer, string name, string label)
+        {
             if (layer == null || string.IsNullOrEmpty(name) || layer.Name == name) { return; }
-            CommitStructure(delegate { layer.Name = name; });
+            CommitStructure(delegate { layer.Name = name; }, label);
         }
 
         public void Undo()
@@ -297,10 +379,56 @@ namespace ImageToolbox
             Notify();
         }
 
+        // ---- 历史记录视图（供 HistoryPanel 使用）----
+
+        // 记录的条数：初始状态 + 已应用 + 已撤销。
+        public int HistoryCount
+        {
+            get { return _undo.Count + _redo.Count + 1; }
+        }
+
+        // 当前处在时间线的哪一步（等于已应用命令数）。
+        public int CurrentHistoryIndex
+        {
+            get { return _undo.Count; }
+        }
+
+        public string HistoryLabel(int index)
+        {
+            if (index <= 0) { return _rootLabel; }
+            int n = _undo.Count;
+            if (index <= n) { return LabelOf(_undo[index - 1]); }
+            int t = index - n;                       // 1.._redo.Count
+            if (t > _redo.Count) { return ""; }
+            return LabelOf(_redo[_redo.Count - t]);
+        }
+
+        // 跳到时间线的第 index 步（0 = 初始状态），通过连续撤销/重做实现。
+        public void JumpTo(int index)
+        {
+            int total = _undo.Count + _redo.Count;
+            if (index < 0) { index = 0; }
+            if (index > total) { index = total; }
+            while (_undo.Count < index) { Redo(); }
+            while (_undo.Count > index) { Undo(); }
+        }
+
+        private static string LabelOf(EditCommand cmd)
+        {
+            if (cmd == null) { return "操作"; }
+            if (!string.IsNullOrEmpty(cmd.Label)) { return cmd.Label; }
+            if (cmd is PixelCommand) { return "像素修改"; }
+            if (cmd is StructureCommand) { return "图层变更"; }
+            if (cmd is MergeDownCommand) { return "向下合并"; }
+            if (cmd is MoveCommand) { return "移动"; }
+            if (cmd is PropsCommand) { return "图层属性"; }
+            return "操作";
+        }
+
         public void ResetToOriginal()
         {
             if (_original == null) { return; }
-            CommitDocument(ImageFilters.Clone(_original));
+            CommitDocument(ImageFilters.Clone(_original), "复位");
         }
 
         public Bitmap Composite()
@@ -543,7 +671,7 @@ namespace ImageToolbox
 
         // ---- internals ----
 
-        private void PushProps(EditLayer layer, Action apply)
+        private void PushProps(EditLayer layer, Action apply, string label)
         {
             bool bv = layer.Visible;
             BlendMode bm = layer.Mode;
@@ -559,6 +687,7 @@ namespace ImageToolbox
                     top.AVisible = layer.Visible;
                     top.AMode = layer.Mode;
                     top.AOpacity = layer.Opacity;
+                    if (!string.IsNullOrEmpty(label)) { top.Label = label; }
                     ClearCommands(_redo);
                     Notify();
                     return;
@@ -569,10 +698,15 @@ namespace ImageToolbox
             cmd.Layer = layer;
             cmd.BVisible = bv; cmd.BMode = bm; cmd.BOpacity = bo;
             cmd.AVisible = layer.Visible; cmd.AMode = layer.Mode; cmd.AOpacity = layer.Opacity;
-            Push(cmd);
+            Push(cmd, label);
         }
 
         private void CommitStructure(Action mutate)
+        {
+            CommitStructure(mutate, null);
+        }
+
+        private void CommitStructure(Action mutate, string label)
         {
             List<LayerState> before = CaptureStructure();
             int beforeActive = _active;
@@ -581,11 +715,17 @@ namespace ImageToolbox
             mutate();
             List<LayerState> after = CaptureStructure();
             int afterActive = _active;
-            Push(new StructureCommand(before, beforeActive, beforeW, beforeH, after, afterActive, _width, _height));
+            Push(new StructureCommand(before, beforeActive, beforeW, beforeH, after, afterActive, _width, _height), label);
         }
 
         private void Push(EditCommand cmd)
         {
+            Push(cmd, null);
+        }
+
+        private void Push(EditCommand cmd, string label)
+        {
+            if (cmd != null && !string.IsNullOrEmpty(label)) { cmd.Label = label; }
             _undo.Add(cmd);
             ClearCommands(_redo);
             while (_undo.Count > Limit)
@@ -828,6 +968,7 @@ namespace ImageToolbox
 
     internal abstract class EditCommand
     {
+        public string Label;   // 历史记录里显示的名称
         public abstract void Undo(EditSession session);
         public abstract void Redo(EditSession session);
         public virtual void CollectBitmaps(List<Bitmap> list) { }

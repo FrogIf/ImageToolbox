@@ -126,6 +126,22 @@ namespace ImageToolbox
             get { return _pending == 4; }
         }
 
+        // 历史记录里按当前即时动作显示更细的名称。
+        public override string HistoryLabel
+        {
+            get
+            {
+                switch (_pending)
+                {
+                    case 1: return "选区 · 删除";
+                    case 2: return "选区 · 填充";
+                    case 3: return "选区 · 贴入";
+                    case 4: return "选区 · 复制到图层";
+                    default: return "选区";
+                }
+            }
+        }
+
         public override bool WantsCanvasDrag
         {
             get

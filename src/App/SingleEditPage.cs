@@ -18,6 +18,7 @@ namespace ImageToolbox
         private ListBox _list;
         private Panel _opHost;
         private LayerPanel _layerPanel;
+        private HistoryPanel _historyPanel;
         private ImageCanvas _canvas;
         private Button _openButton;
         private Button _newButton;
@@ -205,9 +206,7 @@ namespace ImageToolbox
             right.Controls.Add(splitter);
 
             _layerPanel = new LayerPanel();
-            _layerPanel.Dock = DockStyle.Bottom;
-            _layerPanel.Height = 318;
-            _layerPanel.MinimumSize = new Size(0, 220);
+            _layerPanel.Dock = DockStyle.Fill;
             _layerPanel.LayersChanged += delegate { OnLayersChanged(); };
             // 切换/增删图层前，若当前操作有未应用的结果，先询问应用/放弃/取消。
             _layerPanel.ActiveLayerChanging += delegate(object s, LayerChangingEventArgs e)
@@ -221,8 +220,32 @@ namespace ImageToolbox
             };
             // 图层属性（显示/混合模式/不透明度）变化会让背景合成失效，必须整图重合成。
             _layerPanel.PropsChanged += delegate { _composeValid = false; SchedulePreview(); };
-            right.Controls.Add(_layerPanel);
+
+            _historyPanel = new HistoryPanel();
+            _historyPanel.Dock = DockStyle.Fill;
+            _historyPanel.JumpRequested += delegate(int index)
+            {
+                _session.JumpTo(index);
+                ReloadAll();
+                _layerPanel.Sync();
+            };
+
+            // 底部「图层 / 历史」两个 Tab，共用原图层面板的高度与可拖动分隔条。
+            TabControl bottom = new TabControl();
+            bottom.Dock = DockStyle.Bottom;
+            bottom.Height = 318;
+            TabPage layerTab = new TabPage("图层");
+            layerTab.UseVisualStyleBackColor = true;
+            layerTab.Controls.Add(_layerPanel);
+            bottom.TabPages.Add(layerTab);
+            TabPage historyTab = new TabPage("历史");
+            historyTab.UseVisualStyleBackColor = true;
+            historyTab.Controls.Add(_historyPanel);
+            bottom.TabPages.Add(historyTab);
+            right.Controls.Add(bottom);
+
             _layerPanel.Bind(_session);
+            _historyPanel.Bind(_session);
 
             for (int i = 0; i < _ops.Length; i++)
             {
@@ -301,7 +324,7 @@ namespace ImageToolbox
                 Bitmap loaded = ImageUtil.LoadImage(dialog.FileName);
                 ClearCanvasDisplay();
                 _sourcePath = dialog.FileName;
-                _session.SetOriginal(loaded);
+                _session.SetOriginal(loaded, "打开图片");
                 loaded.Dispose();
             }
             catch (Exception ex)
@@ -351,7 +374,7 @@ namespace ImageToolbox
                 }
                 ClearCanvasDisplay();
                 _sourcePath = null;
-                _session.SetOriginal(blank);
+                _session.SetOriginal(blank, "新建图片");
                 blank.Dispose();
             }
             catch (Exception ex)
@@ -400,7 +423,7 @@ namespace ImageToolbox
                 return;
             }
             Bitmap restore = ImageFilters.Clone(_entrySnapshot);
-            _session.CommitDocument(restore);
+            _session.CommitDocument(restore, "重置");
             ReloadAll();
             _layerPanel.Sync();
             _status.Text = "已重置到进入该操作时的图片状态";
@@ -900,7 +923,12 @@ namespace ImageToolbox
             this.Cursor = Cursors.WaitCursor;
             try
             {
-                // 取新图层标志要在 BuildResult 之前（BuildResult 会清掉操作内部的一次性状态）。
+                // 历史名称 / 新图层标志都要在 BuildResult 之前取（BuildResult 会清掉操作内部的一次性状态）。
+                string label = _ops[_active].HistoryLabel;
+                if (string.IsNullOrEmpty(label))
+                {
+                    label = (_active < _list.Items.Count) ? _list.Items[_active].ToString() : "操作";
+                }
                 bool newLayer = _ops[_active].ResultIsNewLayer;
                 Bitmap result = _ops[_active].BuildResult();
                 if (result == null)
@@ -910,15 +938,15 @@ namespace ImageToolbox
                 }
                 if (_ops[_active].DocumentLevel)
                 {
-                    _session.CommitDocument(result);
+                    _session.CommitDocument(result, label);
                 }
                 else if (newLayer)
                 {
-                    _session.AddImageLayer(result, "选区复制");
+                    _session.AddImageLayer(result, "选区复制", label);
                 }
                 else
                 {
-                    _session.CommitToActive(result);
+                    _session.CommitToActive(result, label);
                 }
                 _ops[_active].ResetState();
                 _opDirty = false;

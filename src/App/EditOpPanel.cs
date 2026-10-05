@@ -83,6 +83,13 @@ namespace ImageToolbox
             get { return false; }
         }
 
+        // 历史记录里该操作显示的名称；返回 null/空则由编辑器用左侧操作名兜底。
+        // 可重写以给出更细的名称（如选区的「选区 · 删除」）；编辑器在 BuildResult 之前读取。
+        public virtual string HistoryLabel
+        {
+            get { return null; }
+        }
+
         public virtual string Hint
         {
             get { return ""; }

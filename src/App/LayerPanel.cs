@@ -101,14 +101,14 @@ namespace ImageToolbox
             bar.WrapContents = true;
 
             MakeBar(bar, "添加图片", delegate { AddImages(); });
-            MakeBar(bar, "新建", delegate { Run(delegate { _session.AddBlankLayer("新图层"); }, true); });
-            MakeBar(bar, "复制", delegate { Run(delegate { _session.DuplicateActive(); }); });
-            _remove = MakeBar(bar, "删除", delegate { Run(delegate { _session.RemoveActive(); }); });
-            _up = MakeBar(bar, "上移", delegate { Run(delegate { _session.MoveActive(1); }); });
-            _down = MakeBar(bar, "下移", delegate { Run(delegate { _session.MoveActive(-1); }); });
-            _merge = MakeBar(bar, "向下合并", delegate { Run(delegate { _session.MergeDown(); }); });
-            MakeBar(bar, "盖印", delegate { Run(delegate { _session.StampVisible(); }); });
-            MakeBar(bar, "拼合", delegate { Run(delegate { _session.Flatten(); }); });
+            MakeBar(bar, "新建", delegate { Run(delegate { _session.AddBlankLayer("新图层", "新建图层"); }, true); });
+            MakeBar(bar, "复制", delegate { Run(delegate { _session.DuplicateActive("复制图层"); }); });
+            _remove = MakeBar(bar, "删除", delegate { Run(delegate { _session.RemoveActive("删除图层"); }); });
+            _up = MakeBar(bar, "上移", delegate { Run(delegate { _session.MoveActive(1, "上移图层"); }); });
+            _down = MakeBar(bar, "下移", delegate { Run(delegate { _session.MoveActive(-1, "下移图层"); }); });
+            _merge = MakeBar(bar, "向下合并", delegate { Run(delegate { _session.MergeDown("向下合并"); }); });
+            MakeBar(bar, "盖印", delegate { Run(delegate { _session.StampVisible("盖印"); }); });
+            MakeBar(bar, "拼合", delegate { Run(delegate { _session.Flatten("拼合"); }); });
 
             top.Controls.Add(bar);
             top.Controls.Add(titleBar);
@@ -213,7 +213,7 @@ namespace ImageToolbox
                 for (int i = 0; i < dialog.FileNames.Length; i++)
                 {
                     Bitmap image = ImageUtil.LoadImage(dialog.FileNames[i]);
-                    _session.AddImageLayer(image, Path.GetFileNameWithoutExtension(dialog.FileNames[i]));
+                    _session.AddImageLayer(image, Path.GetFileNameWithoutExtension(dialog.FileNames[i]), "添加图片");
                     image.Dispose();
                 }
             }
@@ -266,7 +266,7 @@ namespace ImageToolbox
             if (_session == null) { return; }
             EditLayer layer = _session.ActiveLayer;
             if (layer == null) { return; }
-            _session.SetVisible(layer, !layer.Visible);
+            _session.SetVisible(layer, !layer.Visible, layer.Visible ? "隐藏图层" : "显示图层");
             UpdateRowText();
             UpdateButtons();
             RaiseProps();
@@ -281,7 +281,7 @@ namespace ImageToolbox
             if (name == null) { return; }
             name = name.Trim();
             if (name.Length == 0) { return; }
-            _session.Rename(layer, name);
+            _session.Rename(layer, name, "重命名图层");
             Sync();
         }
 
@@ -290,7 +290,7 @@ namespace ImageToolbox
             if (_updating || _session == null) { return; }
             EditLayer layer = _session.ActiveLayer;
             if (layer == null) { return; }
-            _session.SetMode(layer, (BlendMode)Math.Max(0, _mode.SelectedIndex));
+            _session.SetMode(layer, (BlendMode)Math.Max(0, _mode.SelectedIndex), "混合模式");
             UpdateRowText();
             RaiseProps();
         }
@@ -300,7 +300,7 @@ namespace ImageToolbox
             if (_updating || _session == null) { return; }
             EditLayer layer = _session.ActiveLayer;
             if (layer == null) { return; }
-            _session.SetOpacity(layer, _opacity.Value / 100f);
+            _session.SetOpacity(layer, _opacity.Value / 100f, "不透明度");
             _opacityV.Text = _opacity.Value + "%";
             UpdateRowText();
             RaiseProps();
